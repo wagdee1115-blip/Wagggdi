@@ -22,7 +22,6 @@ describe('Financial integrity', () => {
     expect(vehicle.add(transfer).add(auction).add(listing).add(tax).toString()).toBe('10292800');
   });
 
-
   it('rejects a duplicate provider payment reference without a second ledger transaction', async () => {
     requireDb();
     process.env.PAYMENT_PROVIDER_WEBHOOK_SECRET = 'test-only-provider-secret';
@@ -41,6 +40,10 @@ describe('Financial integrity', () => {
     } finally {
       await db.financialLedger.deleteMany({ where: { transactionId: sale.id } });
       await db.paymentTransaction.deleteMany({ where: { ownershipTransferId: null, providerReference: `PROVIDER-${suffix}` } });
+      await db.saleAuditLog.deleteMany({ where: { vehicleSaleId: sale.id } });
+      await db.salePayment.deleteMany({ where: { vehicleSaleId: sale.id } });
+      await db.paymentReceipt.deleteMany({ where: { vehicleSaleId: sale.id } });
+      await db.saleContract.deleteMany({ where: { vehicleSaleId: sale.id } });
       await db.vehicleSale.delete({ where: { id: sale.id } });
       await db.exchangeRateHistory.deleteMany({ where: { exchangeRateId: rate.id } });
       await db.exchangeRate.delete({ where: { id: rate.id } });
