@@ -94,7 +94,7 @@ export class OtpService {
   async verifyOtp(params: { otpId: string; otp: string; operationId: string; type: OtpType }): Promise<{ verified: boolean }> {
     if (!/^\d{4}$/.test(params.otp)) throw new Error('OTP_INVALID_FORMAT');
     const now = new Date();
-    return db.$transaction(async tx => {
+    const result = await db.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${params.otpId}))`;
       const record = await tx.otpRecord.findUnique({ where: { id: params.otpId } });
       if (!record) throw new Error('OTP_NOT_FOUND');
@@ -104,15 +104,20 @@ export class OtpService {
       if (record.attempts >= record.maxAttempts) throw new Error('OTP_MAX_ATTEMPTS');
 
       const nextAttempts = record.attempts + 1;
-      await tx.otpRecord.update({ where: { id: record.id }, data: { attempts: nextAttempts } });
       const valid = this.hash(params.otp) === record.otpHash;
-      if (!valid) {
-        if (nextAttempts >= record.maxAttempts) throw new Error('OTP_MAX_ATTEMPTS');
-        throw new Error('OTP_INVALID');
+      if (valid) {
+        await tx.otpRecord.update({ where: { id: record.id }, data: { attempts: nextAttempts, isUsed: true, verifiedAt: now } });
+        return { verified: true as const, error: null as string | null };
       }
-      await tx.otpRecord.update({ where: { id: record.id }, data: { isUsed: true, verifiedAt: now } });
-      return { verified: true };
+
+      // Commit the failed-attempt counter before returning an error. Throwing
+      // inside this transaction would roll the counter back and allow unlimited attempts.
+      await tx.otpRecord.update({ where: { id: record.id }, data: { attempts: nextAttempts } });
+      return { verified: false as const, error: nextAttempts >= record.maxAttempts ? 'OTP_MAX_ATTEMPTS' : 'OTP_INVALID' };
     });
+
+    if (result.error) throw new Error(result.error);
+    return { verified: true };
   }
 
   async cleanupExpired() { return db.otpRecord.deleteMany({ where: { isUsed: false, expiresAt: { lt: new Date() } } }).then(r => r.count); }
