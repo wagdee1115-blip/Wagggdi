@@ -11,10 +11,12 @@ export interface PaymentReceipt {
 export interface EnhancedPaymentProvider {
   name: string;
   createPaymentRequest(amount: number, currency: string, operationId: string): Promise<{ reference: string; status: string; instructions: string }>;
-  verifyPaymentByAdmin(reference: string, adminId: string, adminName: string, bankReference?: string): Promise<{ verified: boolean; status: PaymentVerificationStatus; receipt?: PaymentReceipt }>;
+  verifyPaymentByAdmin(receiptId: string, adminId: string, adminName: string, bankReference?: string): Promise<{ verified: boolean; status: PaymentVerificationStatus; receipt?: PaymentReceipt }>;
 }
 
-function mapReceipt(r: any): PaymentReceipt { return { id:r.id, operationId:r.vehicleSaleId, amountYER:Number(r.amountYER), method:r.method as PaymentMethod, receiptUrl:r.receiptUrl ?? undefined, receiptFileName:r.receiptFileName ?? undefined, uploadedAt:r.uploadedAt, uploadedBy:r.uploadedBy, status:r.status, verifiedBy:r.verifiedBy ?? undefined, verifiedAt:r.verifiedAt ?? undefined, verificationNotes:r.verificationNotes ?? undefined, bankReference:r.bankReference ?? undefined }; }
+function mapReceipt(r: any): PaymentReceipt {
+  return { id: r.id, operationId: r.vehicleSaleId, amountYER: Number(r.amountYER), method: r.method as PaymentMethod, receiptUrl: r.receiptUrl ?? undefined, receiptFileName: r.receiptFileName ?? undefined, uploadedAt: r.uploadedAt, uploadedBy: r.uploadedBy, status: r.status, verifiedBy: r.verifiedBy ?? undefined, verifiedAt: r.verifiedAt ?? undefined, verificationNotes: r.verificationNotes ?? undefined, bankReference: r.bankReference ?? undefined };
+}
 
 export class BankTransferWithReceiptProvider implements EnhancedPaymentProvider {
   name = 'BANK_TRANSFER_WITH_RECEIPT_DB';
@@ -33,19 +35,15 @@ export class BankTransferWithReceiptProvider implements EnhancedPaymentProvider 
     return mapReceipt(receipt);
   }
 
-  async verifyPaymentByAdmin(receiptId: string, adminId: string, adminName: string, bankReference?: string) {
+  async verifyPaymentByAdmin(receiptId: string, adminId: string, adminName: string, bankReference?: string): Promise<{ verified: boolean; status: PaymentVerificationStatus; receipt?: PaymentReceipt }> {
     const receipt = await db.paymentReceipt.update({ where: { id: receiptId }, data: { status: 'VERIFIED', verifiedBy: adminId, verifiedAt: new Date(), bankReference, verificationNotes: `Verified by ${adminName}` } });
-    return { verified: true, receipt: mapReceipt(receipt) };
+    return { verified: true, status: 'VERIFIED', receipt: mapReceipt(receipt) };
   }
 
-  async markPaymentVerified(operationId: string) {
-    const receipt = await db.paymentReceipt.findFirst({ where: { vehicleSaleId: operationId }, orderBy: { createdAt: 'desc' } });
-    return receipt ? mapReceipt(receipt) : undefined;
-  }
-
-  async getReceipt(id: string) { const r=await db.paymentReceipt.findUnique({where:{id}}); return r?mapReceipt(r):undefined; }
-  async getReceiptsByOperation(operationId: string) { const rows=await db.paymentReceipt.findMany({where:{vehicleSaleId:operationId},orderBy:{createdAt:'desc'}}); return rows.map(mapReceipt); }
+  async markPaymentVerified(operationId: string) { const receipt = await db.paymentReceipt.findFirst({ where: { vehicleSaleId: operationId }, orderBy: { createdAt: 'desc' } }); return receipt ? mapReceipt(receipt) : undefined; }
+  async getReceipt(id: string) { const r = await db.paymentReceipt.findUnique({ where: { id } }); return r ? mapReceipt(r) : undefined; }
+  async getReceiptsByOperation(operationId: string) { const rows = await db.paymentReceipt.findMany({ where: { vehicleSaleId: operationId }, orderBy: { createdAt: 'desc' } }); return rows.map(mapReceipt); }
 }
 
 export const paymentProvider = new BankTransferWithReceiptProvider();
-export function isRealPaymentProviderConfigured(){ return Boolean(process.env.PAYMENT_PROVIDER_URL && process.env.PAYMENT_PROVIDER_WEBHOOK_SECRET); }
+export function isRealPaymentProviderConfigured() { return Boolean(process.env.PAYMENT_PROVIDER_URL && process.env.PAYMENT_PROVIDER_WEBHOOK_SECRET); }
