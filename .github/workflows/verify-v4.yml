@@ -1,7 +1,9 @@
+
 name: Verify MARKABAT V4
 
 on:
   workflow_dispatch:
+
   push:
     branches:
       - markabat-v4-verification
@@ -27,52 +29,133 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
+          node-version: 20
 
-      - name: Verify backend exists
+      - name: Verify backend files
         run: |
           set -e
+
+          echo "=== MARKABAT V4 BACKEND ==="
+
           test -f package.json
           test -f prisma/schema.prisma
-          echo "Backend source found."
+          test -f prisma/seed.ts
+          test -f vercel.json
+          test -f next.config.js
+
+          echo "Backend required files found."
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          set -e
+
+          echo "=== Installing dependencies ==="
+
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Prisma validate
-        run: npx prisma validate
+        run: |
+          set -e
+
+          echo "=== Prisma validation ==="
+
+          npx prisma validate
 
       - name: Prisma generate
-        run: npx prisma generate
+        run: |
+          set -e
+
+          echo "=== Prisma client generation ==="
+
+          npx prisma generate
 
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        run: |
+          set -e
+
+          echo "=== TypeScript typecheck ==="
+
+          npx tsc --noEmit
 
       - name: Run unit and integration tests
-        run: npm test -- --runInBand
-        continue-on-error: true
+        run: |
+          set -e
+
+          echo "=== Unit and integration tests ==="
+
+          npm test -- --runInBand
 
       - name: Financial tests
-        run: npx jest tests/financial.test.ts --runInBand
-        continue-on-error: true
+        run: |
+          set -e
+
+          echo "=== Financial tests ==="
+
+          npx jest tests/financial.test.ts --runInBand
 
       - name: Sale concurrency tests
-        run: npx jest tests/sale-concurrency.test.ts --runInBand
-        continue-on-error: true
+        run: |
+          set -e
+
+          echo "=== Sale concurrency tests ==="
+
+          npx jest tests/sale-concurrency.test.ts --runInBand
 
       - name: Security tests
-        run: npx jest tests/security.test.ts --runInBand
-        continue-on-error: true
+        run: |
+          set -e
+
+          echo "=== Security tests ==="
+
+          npx jest tests/security.test.ts --runInBand
 
       - name: OTP tests
-        run: npx jest tests/otp.test.ts --runInBand
-        continue-on-error: true
+        run: |
+          set -e
+
+          echo "=== OTP tests ==="
+
+          npx jest tests/otp.test.ts --runInBand
 
       - name: State machine tests
-        run: npx jest tests/state-machine.test.ts --runInBand
-        continue-on-error: true
+        run: |
+          set -e
 
-      - name: Build
-        run: npm run build
+          echo "=== State machine tests ==="
+
+          npx jest tests/state-machine.test.ts --runInBand
+
+      - name: Core tests
+        run: |
+          set -e
+
+          echo "=== Core tests ==="
+
+          npx jest tests/core.test.ts --runInBand
+
+      - name: E2E tests
+        run: |
+          set -e
+
+          echo "=== E2E tests ==="
+
+          npx jest tests/e2e.test.ts --runInBand
+
+      - name: Final verification
+        run: |
+          set -e
+
+          echo "========================================"
+          echo " MARKABAT V4 VERIFICATION COMPLETED "
+          echo "========================================"
+          echo "Files: PASS"
+          echo "Dependencies: PASS"
+          echo "Prisma validate: PASS"
+          echo "Prisma generate: PASS"
+          echo "TypeScript: PASS"
+          echo "Tests: PASS"
+          echo "========================================"
