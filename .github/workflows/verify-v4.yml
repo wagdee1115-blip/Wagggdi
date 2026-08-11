@@ -2,7 +2,6 @@ name: Verify MARKABAT V4
 
 on:
   workflow_dispatch:
-
   push:
     branches:
       - markabat-v4-verification
@@ -16,7 +15,6 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-
     services:
       postgres:
         image: postgres:16
@@ -51,154 +49,62 @@ jobs:
       - name: Verify backend files
         run: |
           set -e
-
-          echo "=== MARKABAT V4 BACKEND ==="
-
           test -f package.json
           test -f prisma/schema.prisma
           test -f prisma/seed.ts
           test -f vercel.json
           test -f next.config.js
-
           echo "Backend required files found."
 
       - name: Install dependencies
         run: |
           set -e
-
-          echo "=== Installing dependencies ==="
-
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
       - name: Check PostgreSQL
         run: |
           set -e
-
-          echo "=== PostgreSQL ==="
-
-          node -e "
-          const net = require('net');
-          const socket = net.createConnection({
-            host: '127.0.0.1',
-            port: 5432
-          });
-
-          socket.on('connect', () => {
-            console.log('PostgreSQL port is reachable.');
-            socket.end();
-            process.exit(0);
-          });
-
-          socket.on('error', (err) => {
-            console.error(err.message);
-            process.exit(1);
-          });
-          "
+          node -e "const net=require('net');const s=net.createConnection({host:'127.0.0.1',port:5432});s.on('connect',()=>{console.log('PostgreSQL port is reachable.');s.end();process.exit(0)});s.on('error',e=>{console.error(e.message);process.exit(1)})"
 
       - name: Prisma validate
-        run: |
-          set -e
-
-          echo "=== Prisma validation ==="
-
-          npx prisma validate
+        run: npx prisma validate
 
       - name: Prisma generate
-        run: |
-          set -e
-
-          echo "=== Prisma client generation ==="
-
-          npx prisma generate
+        run: npx prisma generate
 
       - name: Prisma database setup
-        run: |
-          set -e
-
-          echo "=== Prisma database setup ==="
-
-          npx prisma db push --skip-generate
+        run: npx prisma db push --skip-generate
 
       - name: TypeScript typecheck
-        run: |
-          set -e
-
-          echo "=== TypeScript typecheck ==="
-
-          npx tsc --noEmit
+        run: npx tsc --noEmit
 
       - name: Run unit and integration tests
-        run: |
-          set -e
-
-          echo "=== Unit and integration tests ==="
-
-          npm test
+        run: npm test
 
       - name: Financial tests
-        run: |
-          set -e
-
-          echo "=== Financial tests ==="
-
-          npx jest tests/financial.test.ts --runInBand
+        run: npx vitest run tests/financial.test.ts
 
       - name: Sale concurrency tests
-        run: |
-          set -e
-
-          echo "=== Sale concurrency tests ==="
-
-          npx jest tests/sale-concurrency.test.ts --runInBand
+        run: npx vitest run tests/sale-concurrency.test.ts
 
       - name: Security tests
-        run: |
-          set -e
-
-          echo "=== Security tests ==="
-
-          npx jest tests/security.test.ts --runInBand
+        run: npx vitest run tests/security.test.ts
 
       - name: OTP tests
-        run: |
-          set -e
-
-          echo "=== OTP tests ==="
-
-          npx jest tests/otp.test.ts --runInBand
+        run: npx vitest run tests/otp.test.ts
 
       - name: State machine tests
-        run: |
-          set -e
-
-          echo "=== State machine tests ==="
-
-          npx jest tests/state-machine.test.ts --runInBand
+        run: npx vitest run tests/state-machine.test.ts
 
       - name: Core tests
-        run: |
-          set -e
+        run: npx vitest run tests/core.test.ts
 
-          echo "=== Core tests ==="
-
-          npx jest tests/core.test.ts --runInBand
-
-      - name: E2E tests
-        run: |
-          set -e
-
-          echo "=== E2E tests ==="
-
-          npx jest tests/e2e.test.ts --runInBand
+      - name: E2E verification gates
+        run: npx vitest run tests/e2e.test.ts
 
       - name: Final verification
         run: |
           set -e
-
           echo "========================================"
           echo " MARKABAT V4 VERIFICATION COMPLETED "
           echo "========================================"
