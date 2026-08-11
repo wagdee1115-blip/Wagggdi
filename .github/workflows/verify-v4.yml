@@ -1,4 +1,3 @@
-
 name: Verify MARKABAT V4
 
 on:
@@ -18,6 +17,24 @@ jobs:
   verify:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: markabat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d markabat_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/markabat_test
+
     defaults:
       run:
         working-directory: backend
@@ -29,7 +46,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Verify backend files
         run: |
@@ -57,6 +74,31 @@ jobs:
             npm install
           fi
 
+      - name: Check PostgreSQL
+        run: |
+          set -e
+
+          echo "=== PostgreSQL ==="
+
+          node -e "
+          const net = require('net');
+          const socket = net.createConnection({
+            host: '127.0.0.1',
+            port: 5432
+          });
+
+          socket.on('connect', () => {
+            console.log('PostgreSQL port is reachable.');
+            socket.end();
+            process.exit(0);
+          });
+
+          socket.on('error', (err) => {
+            console.error(err.message);
+            process.exit(1);
+          });
+          "
+
       - name: Prisma validate
         run: |
           set -e
@@ -72,6 +114,14 @@ jobs:
           echo "=== Prisma client generation ==="
 
           npx prisma generate
+
+      - name: Prisma database setup
+        run: |
+          set -e
+
+          echo "=== Prisma database setup ==="
+
+          npx prisma db push --skip-generate
 
       - name: TypeScript typecheck
         run: |
@@ -154,8 +204,10 @@ jobs:
           echo "========================================"
           echo "Files: PASS"
           echo "Dependencies: PASS"
+          echo "PostgreSQL: PASS"
           echo "Prisma validate: PASS"
           echo "Prisma generate: PASS"
+          echo "Database setup: PASS"
           echo "TypeScript: PASS"
           echo "Tests: PASS"
           echo "========================================"
