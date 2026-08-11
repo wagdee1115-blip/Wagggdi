@@ -137,7 +137,7 @@ jobs:
 
           echo "=== Unit and integration tests ==="
 
-          npm test -- --runInBand
+          npm test
 
       - name: Financial tests
         run: |
