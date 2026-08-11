@@ -1,0 +1,7 @@
+{
+  "crons": [
+    { "path": "/api/cron/auctions/finalize", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/sales/expire", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/authorizations/expire", "schedule": "0 * * * *" }
+  ]
+}

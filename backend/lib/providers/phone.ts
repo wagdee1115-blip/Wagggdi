@@ -1,0 +1,3 @@
+export interface PhoneProvider { name:string; configured:boolean; sendOtp(phone:string):Promise<{providerReference:string;expiresAt:Date}>; verifyOtp(phone:string,otp:string,reference:string):Promise<boolean>; verifyPhoneOwnership?(nationalId:string,phone:string):Promise<{owned:boolean;message:string}>; }
+export class UnconfiguredPhoneProvider implements PhoneProvider { name='SMS_NOT_CONFIGURED'; configured=false; async sendOtp(){throw new Error('NOT_CONFIGURED:PHONE_PROVIDER_REQUIRED');} async verifyOtp(){throw new Error('NOT_CONFIGURED:PHONE_PROVIDER_REQUIRED');} async verifyPhoneOwnership(){throw new Error('NOT_CONFIGURED:PHONE_PROVIDER_REQUIRED');} }
+export const phoneProvider=new UnconfiguredPhoneProvider();

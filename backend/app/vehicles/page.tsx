@@ -1,0 +1,3 @@
+'use client';
+import {useEffect,useState} from 'react';
+export default function Vehicles(){const[v,setV]=useState<any[]>([]);useEffect(()=>{fetch('/api/vehicles').then(r=>r.json()).then(x=>x.ok&&setV(x.vehicles))},[]);return <main dir="rtl" className="min-h-screen bg-slate-50 p-5"><div className="mx-auto max-w-5xl"><a href="/" className="font-bold text-primary-900">← الرئيسية</a><h1 className="my-6 text-2xl font-black">المركبات</h1><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{v.map(x=><div key={x.id} className="rounded-2xl border bg-white p-5"><b>{x.make} {x.model}</b><p className="text-sm text-slate-500">{x.year} · {x.city} · {x.plateNumber}</p><p className="mt-3 font-bold">{Number(x.price).toLocaleString('ar-YE')} ريال</p></div>)}</div></div></main>}
