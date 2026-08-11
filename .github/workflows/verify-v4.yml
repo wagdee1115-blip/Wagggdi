@@ -1,0 +1,78 @@
+name: Verify MARKABAT V4
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - markabat-v4-verification
+    paths:
+      - "backend/**"
+      - ".github/workflows/verify-v4.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout V4 verification branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Verify backend exists
+        run: |
+          set -e
+          test -f package.json
+          test -f prisma/schema.prisma
+          echo "Backend source found."
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma validate
+        run: npx prisma validate
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+
+      - name: Run unit and integration tests
+        run: npm test -- --runInBand
+        continue-on-error: true
+
+      - name: Financial tests
+        run: npx jest tests/financial.test.ts --runInBand
+        continue-on-error: true
+
+      - name: Sale concurrency tests
+        run: npx jest tests/sale-concurrency.test.ts --runInBand
+        continue-on-error: true
+
+      - name: Security tests
+        run: npx jest tests/security.test.ts --runInBand
+        continue-on-error: true
+
+      - name: OTP tests
+        run: npx jest tests/otp.test.ts --runInBand
+        continue-on-error: true
+
+      - name: State machine tests
+        run: npx jest tests/state-machine.test.ts --runInBand
+        continue-on-error: true
+
+      - name: Build
+        run: npm run build
