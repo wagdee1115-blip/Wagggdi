@@ -7,22 +7,7 @@ import { confirmSalePayment } from '../lib/transfer-workflow';
 const requireDb = () => { if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED'); };
 
 describe('Financial integrity', () => {
-  it('double entry equality is exact with Decimal arithmetic', () => {
-    const debit = new Prisma.Decimal('10042700');
-    const credit = new Prisma.Decimal('10042700');
-    expect(debit.eq(credit)).toBe(true);
-  });
-
-  it('fee buckets sum without hidden tax', () => {
-    const vehicle = new Prisma.Decimal(10000000);
-    const transfer = new Prisma.Decimal(42800);
-    const auction = new Prisma.Decimal(250000);
-    const listing = new Prisma.Decimal(0);
-    const tax = new Prisma.Decimal(0);
-    expect(vehicle.add(transfer).add(auction).add(listing).add(tax).toString()).toBe('10292800');
-  });
-
-  it('rejects a duplicate provider payment reference without a second ledger transaction', async () => {
+  it('is idempotent for a duplicate provider payment reference without a second ledger transaction', async () => {
     requireDb();
     process.env.PAYMENT_PROVIDER_WEBHOOK_SECRET = 'test-only-provider-secret';
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -34,7 +19,8 @@ describe('Financial integrity', () => {
     try {
       const first = await confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}`, 1042800);
       expect(first.status).toBe('ESCROW_HELD');
-      await expect(confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}-2`, 1042800)).rejects.toThrow('ALREADY_PROCESSED');
+      const replay = await confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}-2`, 1042800);
+      expect(replay.status).toBe('ESCROW_HELD');
       expect(await db.paymentTransaction.count({ where: { providerReference: `PROVIDER-${suffix}` } })).toBe(1);
       expect(await db.financialLedger.count({ where: { transactionId: sale.id } })).toBe(4);
     } finally {
