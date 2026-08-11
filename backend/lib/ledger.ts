@@ -13,6 +13,8 @@ export async function createDoubleEntry(params: {
   debitType: string; creditType: string; userId?: string; relatedOperationId?: string; providerRef?: string;
   idempotencyKey: string; metadata?: Prisma.InputJsonValue;
 }, client: DbClient = db) {
+  if (client === db) return db.$transaction(tx => createDoubleEntry(params, tx));
+
   const amount = new Prisma.Decimal(params.amount);
   if (amount.lte(0)) throw new Error('LEDGER_AMOUNT_MUST_BE_POSITIVE');
   if (params.debitType === params.creditType) throw new Error('LEDGER_SAME_ACCOUNT');
