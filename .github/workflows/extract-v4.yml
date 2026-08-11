@@ -2,6 +2,11 @@ name: Extract MARKABAT V4
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - markabat-v4-verification
+    paths:
+      - '.github/workflows/extract-v4.yml'
 
 permissions:
   contents: write
@@ -21,7 +26,7 @@ jobs:
           ZIP="MARKABAT-V4-SOURCE-ONE-FILE.zip"
 
           if [ ! -f "$ZIP" ]; then
-            echo "ERROR: $ZIP not found"
+            echo "ERROR: ZIP not found"
             exit 1
           fi
 
@@ -37,8 +42,10 @@ jobs:
 
           if [ -d ".v4-extract/backend" ]; then
             cp -a .v4-extract/backend ./backend
+
           elif [ -d ".v4-extract/MARKABAT-V4/backend" ]; then
             cp -a .v4-extract/MARKABAT-V4/backend ./backend
+
           else
             BACKEND_DIR=$(find .v4-extract -type d -name backend | head -1)
 
@@ -67,6 +74,8 @@ jobs:
 
       - name: Commit extracted V4 source
         run: |
+          set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
