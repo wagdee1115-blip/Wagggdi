@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     const existing = await db.user.findFirst({ where: { OR: or } });
     if (existing) return Response.json(REGISTRATION_DUPLICATE_RESPONSE, { status:409 });
     const user = await db.user.create({ data: { fullName:data.fullName, nationalId:data.nationalId ?? null, dateOfBirth:data.dateOfBirth ? new Date(data.dateOfBirth) : null, phone:data.phone, email:data.email ?? null, passwordHash:await hashPassword(data.password), role:'USER', status:'PENDING' } });
-    const token = await signJwt({ sub:user.id, role:user.role });
+    const token = await signJwt({ sub:user.id, role:user.role, sessionVersion:user.sessionVersion, sessionType:'REGISTRATION' });
     cookies().set('markabat_session',token,{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'lax',path:'/',maxAge:30*60});
     return Response.json({ ok:true, user:{id:user.id,fullName:user.fullName,status:user.status} }, { status:201 });
   } catch (e) {

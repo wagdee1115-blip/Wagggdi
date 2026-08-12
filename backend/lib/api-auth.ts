@@ -7,6 +7,10 @@ export function isActiveAccount(user: { status: string } | null | undefined) {
   return user?.status === 'ACTIVE';
 }
 
+export function isOnboardingAccount(user: { status: string; role: string } | null | undefined) {
+  return user?.status === 'PENDING' && user.role === 'USER';
+}
+
 /** Session lookup for the few flows that must remain available after suspension (currently logout only). */
 export async function getSessionUser() {
   const token = cookies().get('markabat_session')?.value;
@@ -23,6 +27,22 @@ export async function getSessionUser() {
 export async function getCurrentUser() {
   const user = await getSessionUser();
   return isActiveAccount(user) ? user : null;
+}
+
+/** Restricted registration-session boundary used only by phone onboarding. */
+export async function getOnboardingUser() {
+  const token = cookies().get('markabat_session')?.value;
+  if (!token) return null;
+  const payload = await verifyJwt(token);
+  if (!payload?.sub || payload.sessionType !== 'REGISTRATION' || payload.role !== 'USER') return null;
+  const user = await db.user.findUnique({ where: { id: String(payload.sub) } });
+  if (!isOnboardingAccount(user)) return null;
+  if (Number(payload.sessionVersion) !== user.sessionVersion) return null;
+  return user;
+}
+
+export async function getOtpUser() {
+  return (await getCurrentUser()) ?? getOnboardingUser();
 }
 
 export async function requireUser() {

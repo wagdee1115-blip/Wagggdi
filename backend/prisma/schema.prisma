@@ -1283,6 +1283,7 @@ model PasswordResetRequest {
   user User @relation(fields: [userId], references: [id])
   otpId String
   operationId String @unique
+  recoveryTokenHash String @unique
   riskLevel RiskLevel @default(LOW)
   verifiedAt DateTime?
   completedAt DateTime?

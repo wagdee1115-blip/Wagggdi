@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { isActiveAccount } from '../lib/api-auth';
+import { isActiveAccount, isOnboardingAccount } from '../lib/api-auth';
 import { getTrustedClientIp, rateLimitTarget } from '../lib/request-identity';
-import { PASSWORD_RESET_PUBLIC_RESPONSE } from '../app/api/auth/forgot-password/request/route';
+import { passwordResetPublicResponse } from '../app/api/auth/forgot-password/request/route';
 import { REGISTRATION_DUPLICATE_RESPONSE } from '../app/api/auth/register/route';
 import { consumeRateLimit } from '../lib/rate-limit';
 
@@ -14,13 +14,23 @@ describe('P0 account-status boundary', () => {
 
 describe('P0 enumeration-safe public contracts', () => {
   it('uses one password-reset response without account or risk data', () => {
-    expect(PASSWORD_RESET_PUBLIC_RESPONSE).toEqual({ ok: true, message: 'IF_ACCOUNT_EXISTS_RESET_INSTRUCTIONS_WILL_BE_SENT' });
-    expect(PASSWORD_RESET_PUBLIC_RESPONSE).not.toHaveProperty('riskLevel');
-    expect(PASSWORD_RESET_PUBLIC_RESPONSE).not.toHaveProperty('requestId');
+    const response = passwordResetPublicResponse('opaque-token');
+    expect(response).toEqual({ ok: true, message: 'IF_ACCOUNT_EXISTS_RESET_INSTRUCTIONS_WILL_BE_SENT', recoveryToken: 'opaque-token' });
+    expect(response).not.toHaveProperty('riskLevel');
+    expect(response).not.toHaveProperty('requestId');
   });
 
   it('uses one registration collision response for every unique identifier', () => {
     expect(REGISTRATION_DUPLICATE_RESPONSE).toEqual({ ok: false, error: 'REGISTRATION_UNAVAILABLE' });
+  });
+});
+
+describe('P0 onboarding boundary', () => {
+  it('allows only pending ordinary users', () => {
+    expect(isOnboardingAccount({ status: 'PENDING', role: 'USER' })).toBe(true);
+    expect(isOnboardingAccount({ status: 'ACTIVE', role: 'USER' })).toBe(false);
+    expect(isOnboardingAccount({ status: 'SUSPENDED', role: 'USER' })).toBe(false);
+    expect(isOnboardingAccount({ status: 'PENDING', role: 'ADMIN' })).toBe(false);
   });
 });
 
