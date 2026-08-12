@@ -1,0 +1,142 @@
+name: Verify MARKABAT V4
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - markabat-v4-payout-guard
+    paths:
+      - "backend/**"
+      - ".github/workflows/verify-v4.yml"
+  push:
+    branches:
+      - markabat-v4-verification
+    paths:
+      - "backend/**"
+      - ".github/workflows/verify-v4.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: markabat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d markabat_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/markabat_test
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout workflow or pull request HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify backend files
+        run: |
+          set -e
+          test -f package.json
+          test -f prisma/schema.prisma
+          test -f prisma/seed.ts
+          test -f vercel.json
+          test -f next.config.js
+          echo "Backend required files found."
+
+      - name: Install dependencies
+        run: |
+          set -e
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Check PostgreSQL
+        run: |
+          set -e
+          node -e "const net=require('net');const s=net.createConnection({host:'127.0.0.1',port:5432});s.on('connect',()=>{console.log('PostgreSQL port is reachable.');s.end();process.exit(0)});s.on('error',e=>{console.error(e.message);process.exit(1)})"
+
+      - name: Prisma validate
+        run: npx prisma validate
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Require migration history
+        run: |
+          set -e
+          test -d prisma/migrations
+          test -n "$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          echo "Prisma migration history found."
+
+      - name: Prisma migrate deploy
+        run: npx prisma migrate deploy
+
+      - name: Prisma migrate status
+        run: npx prisma migrate status
+
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+
+      - name: Run unit and integration tests
+        run: npm test
+
+      - name: Financial tests
+        run: npx vitest run tests/financial.test.ts
+
+      - name: Sale concurrency tests
+        run: npx vitest run tests/sale-concurrency.test.ts
+
+      - name: Security tests
+        run: npx vitest run tests/security.test.ts
+
+      - name: OTP tests
+        run: npx vitest run tests/otp.test.ts
+
+      - name: State machine tests
+        run: npx vitest run tests/state-machine.test.ts
+
+      - name: Core tests
+        run: npx vitest run tests/core.test.ts
+
+      - name: E2E verification gates
+        run: npx vitest run tests/e2e.test.ts
+
+      - name: Production build
+        run: npm run build
+
+      - name: Final verification summary
+        run: |
+          set -e
+          echo "========================================"
+          echo " MARKABAT V4 VERIFICATION PIPELINE "
+          echo "========================================"
+          echo "Files: PASS"
+          echo "Dependencies: PASS"
+          echo "PostgreSQL: PASS"
+          echo "Prisma validate: PASS"
+          echo "Prisma generate: PASS"
+          echo "Migration deploy: PASS"
+          echo "Migration status: PASS"
+          echo "TypeScript: PASS"
+          echo "Tests: PASS"
+          echo "Build: PASS"
+          echo "========================================"
