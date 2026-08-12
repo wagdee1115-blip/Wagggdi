@@ -1,0 +1,5 @@
+import { db } from '@/lib/db';
+import { getCurrentUser, apiError } from '@/lib/api-auth';
+import { vehicleSchema } from '@/lib/validations';
+export async function GET(req:Request){ try{ const url=new URL(req.url); const q=url.searchParams.get('q')||''; const vehicles=await db.vehicle.findMany({where:{status:'ACTIVE',OR:q?[{plateNumber:{contains:q,mode:'insensitive'}},{make:{contains:q,mode:'insensitive'}},{model:{contains:q,mode:'insensitive'}}]:undefined},orderBy:{createdAt:'desc'},take:50}); return Response.json({ok:true,vehicles}); }catch(e){return apiError(e)} }
+export async function POST(req:Request){ try{ const u=await getCurrentUser(); if(!u)return Response.json({ok:false,error:'UNAUTHORIZED'},{status:401}); const p=vehicleSchema.safeParse(await req.json()); if(!p.success)return Response.json({ok:false,error:'INVALID_INPUT',details:p.error.flatten()},{status:400}); const v=await db.vehicle.create({data:{...p.data,ownerId:u.id,status:'DRAFT'}}); return Response.json({ok:true,vehicle:v},{status:201}); }catch(e){return apiError(e)} }

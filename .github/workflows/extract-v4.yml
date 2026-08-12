@@ -1,0 +1,91 @@
+name: Extract MARKABAT V4
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - markabat-v4-verification
+    paths:
+      - '.github/workflows/extract-v4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout verification branch
+        uses: actions/checkout@v4
+
+      - name: Extract V4 source ZIP
+        run: |
+          set -e
+
+          ZIP="MARKABAT-V4-SOURCE-ONE-FILE.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: ZIP not found"
+            exit 1
+          fi
+
+          mkdir -p .v4-extract
+          unzip -q -o "$ZIP" -d .v4-extract
+
+          echo "=== Extracted files ==="
+          find .v4-extract -maxdepth 5 -type f | sort | head -300
+
+      - name: Detect project root
+        run: |
+          set -e
+
+          if [ -d ".v4-extract/backend" ]; then
+            cp -a .v4-extract/backend ./backend
+
+          elif [ -d ".v4-extract/MARKABAT-V4/backend" ]; then
+            cp -a .v4-extract/MARKABAT-V4/backend ./backend
+
+          else
+            BACKEND_DIR=$(find .v4-extract -type d -name backend | head -1)
+
+            if [ -n "$BACKEND_DIR" ]; then
+              cp -a "$BACKEND_DIR" ./backend
+            else
+              echo "ERROR: backend directory not found"
+              find .v4-extract -maxdepth 5 -type f | sort
+              exit 1
+            fi
+          fi
+
+      - name: Verify required files
+        run: |
+          set -e
+
+          echo "=== Required MARKABAT V4 files ==="
+
+          test -f backend/package.json
+          test -f backend/prisma/schema.prisma
+          test -f backend/prisma/seed.ts
+          test -f backend/vercel.json
+          test -f backend/next.config.js
+
+          echo "Required files found."
+
+      - name: Commit extracted V4 source
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          rm -rf .v4-extract
+
+          git add backend
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Extract MARKABAT V4 source for verification"
+            git push
+          fi

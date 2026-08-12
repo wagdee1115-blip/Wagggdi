@@ -1,0 +1,1357 @@
+// مركبات - Prisma Schema - Yemen Vehicle Platform
+// التكاملات الخارجية تُعامل كـ NOT_CONFIGURED حتى يتم إعداد مزود حقيقي
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  SELLER
+  BUYER
+  DEALER
+  SUPPORT
+  FINANCE
+  VERIFIER
+  AUDITOR
+  ADMIN
+  SUPER_ADMIN
+  OWNER
+  MODERATOR
+}
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+enum IdentityStatus {
+  UNVERIFIED
+  MOBILE_VERIFIED
+  IDENTITY_VERIFIED
+  IDENTITY_FACE_VERIFIED
+  ADVANCED_VERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+enum PhoneVerificationStatus {
+  PENDING
+  VERIFIED
+  FAILED
+  EXPIRED
+}
+enum VehicleStatus {
+  DRAFT
+  PENDING
+  ACTIVE
+  SOLD
+  HIDDEN
+  REJECTED
+}
+enum GovernmentStatus {
+  UNKNOWN
+  VERIFIED
+  RESTRICTED
+  BLOCKED
+}
+enum OwnershipStatus {
+  ACTIVE
+  PREVIOUS
+  PENDING_TRANSFER
+}
+enum TransferStatus {
+  DRAFT
+  WAITING_BUYER
+  VERIFYING_SELLER
+  VERIFYING_BUYER
+  VERIFYING_VEHICLE
+  WAITING_PAYMENT
+  PAYMENT_HELD
+  WAITING_GOVERNMENT
+  GOVERNMENT_APPROVED
+  OWNERSHIP_TRANSFERRED
+  PAYMENT_RELEASED
+  COMPLETED
+  REJECTED
+  CANCELLED
+  EXPIRED
+  PAYMENT_PROCESSING
+  ESCROW_HELD
+  TRANSFER_PENDING
+  TRANSFER_BLOCKED
+  HANDOVER_PENDING
+  HANDOVER_CONFIRMED
+  PAYOUT_PROTECTION
+  PAYOUT_PENDING
+  PAYOUT_PROCESSING
+  PAYOUT_CONFIRMED
+  DISPUTED
+  PAYOUT_REVIEW_REQUIRED
+  FAILED
+  MANUAL_REVIEW
+}
+enum TransferStepType {
+  SELLER_VERIFICATION
+  BUYER_VERIFICATION
+  PHONE_VERIFICATION
+  VEHICLE_VERIFICATION
+  INSURANCE_VERIFICATION
+  INSPECTION_VERIFICATION
+  RESTRICTION_VERIFICATION
+  PAYMENT
+  GOVERNMENT_TRANSFER
+  COMPLETION
+}
+enum StepStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+enum PaymentStatus {
+  CREATED
+  PENDING
+  HELD
+  SUCCESS
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+enum BankVerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  FAILED
+}
+enum AuctionStatus {
+  DRAFT
+  ACTIVE
+  ENDED
+  CANCELLED
+  SOLD
+}
+enum ViolationStatus {
+  PENDING
+  PAID
+  DISPUTED
+  CANCELLED
+}
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+enum DocumentType {
+  ID
+  VEHICLE_DOCUMENT
+  INSURANCE
+  INSPECTION
+  OTHER
+}
+enum ProviderStatus {
+  NOT_CONFIGURED
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+model User {
+  id String @id @default(cuid())
+  fullName String
+  nationalId String? @unique
+  dateOfBirth DateTime?
+  phone String @unique
+  email String? @unique
+  passwordHash String
+  avatar String?
+  role Role @default(USER)
+  status UserStatus @default(PENDING)
+  identityStatus IdentityStatus @default(UNVERIFIED)
+  phoneStatus PhoneVerificationStatus @default(PENDING)
+  sessionVersion Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  identityVerifications IdentityVerification[]
+  phoneVerifications PhoneVerification[]
+  otpRecords OtpRecord[]
+  vehicles Vehicle[] @relation("OwnerVehicles")
+  ownedHistory VehicleOwnership[]
+  favorites Favorite[]
+  conversations ConversationParticipant[]
+  messages Message[]
+  bankAccounts BankAccount[]
+  payments PaymentTransaction[]
+  auditLogs AuditLog[]
+  ownershipRequestsAsSeller OwnershipTransferRequest[] @relation("Seller")
+  ownershipRequestsAsBuyer OwnershipTransferRequest[] @relation("Buyer")
+  auctions Auction[]
+  bids AuctionBid[]
+  autoBids AuctionAutoBid[]
+  bidDeposits AuctionBidDeposit[]
+  auctionsWon Auction[] @relation("AuctionWinner")
+  violations Violation[]
+  appointments Appointment[]
+  sellerSales VehicleSale[] @relation("SellerSales")
+  buyerSales VehicleSale[] @relation("BuyerSales")
+  notifications Notification[]
+  supportTickets SupportTicket[]
+  supportMessages SupportMessage[]
+  listingsCreated VehicleListing[] @relation("ListingCreator")
+  authorizationsAsOwner VehicleAuthorization[] @relation("AuthorizationOwner")
+  authorizationsAsAuthorized VehicleAuthorization[] @relation("AuthorizationAuthorized")
+  payoutAccounts PayoutAccount[]
+  ledgerEntries FinancialLedger[]
+  disputes Dispute[] @relation("DisputeUser")
+  riskEvents RiskEvent[]
+  operationsCreated Operation[] @relation("OperationCreator")
+  invoices Invoice[]
+  handoverBuyer HandoverEvidence[] @relation("HandoverBuyer")
+  handoverSeller HandoverEvidence[] @relation("HandoverSeller")
+  passwordResetRequests PasswordResetRequest[]
+  listingViews ListingView[]
+  comments Comment[]
+  commentReports CommentReport[] @relation("CommentReports")
+}
+
+model IdentityVerification {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  nationalId String
+  dateOfBirth DateTime
+  provider String // IdentityProvider name
+  providerReference String?
+  status IdentityStatus @default(PENDING)
+  verifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PhoneVerification {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  phone String
+  provider String
+  providerReference String?
+  otpHash String
+  expiresAt DateTime
+  verifiedAt DateTime?
+  status PhoneVerificationStatus @default(PENDING)
+  attempts Int @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Vehicle {
+  id String @id @default(cuid())
+  ownerId String
+  owner User @relation("OwnerVehicles", fields: [ownerId], references: [id])
+  plateNumber String @unique
+  vin String @unique
+  make String
+  model String
+  year Int
+  price Decimal
+  mileage Int
+  transmission String // AUTO, MANUAL
+  fuelType String // PETROL, DIESEL, HYBRID, ELECTRIC
+  color String
+  city String
+  description String? @db.Text
+  status VehicleStatus @default(DRAFT)
+  isReserved Boolean @default(false)
+  hasLegalBlock Boolean @default(false)
+  governmentStatus GovernmentStatus @default(UNKNOWN)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownershipHistory VehicleOwnership[]
+  insurances VehicleInsurance[]
+  inspections VehicleInspection[]
+  favorites Favorite[]
+  ownershipRequests OwnershipTransferRequest[]
+  auctions Auction[]
+  violations Violation[]
+  vehicleSales VehicleSale[]
+  listings VehicleListing[]
+  authorizations VehicleAuthorization[]
+  priceHistory VehiclePriceHistory[]
+  handoverEvidence HandoverEvidence[]
+  media VehicleMedia[]
+  listingViews ListingView[]
+}
+
+model VehicleOwnership {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  ownerId String
+  owner User @relation(fields: [ownerId], references: [id])
+  ownershipStatus OwnershipStatus @default(ACTIVE)
+  verifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VehicleInsurance {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  provider String
+  policyNumber String
+  status String
+  startDate DateTime
+  endDate DateTime
+}
+
+model VehicleInspection {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  provider String
+  inspectionNumber String
+  status String
+  inspectionDate DateTime
+  expiryDate DateTime
+  result String
+  notes String?
+}
+
+model Favorite {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  createdAt DateTime @default(now())
+  @@unique([userId, vehicleId])
+}
+
+model Conversation {
+  id String @id @default(cuid())
+  vehicleId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  participants ConversationParticipant[]
+  messages Message[]
+}
+
+model ConversationParticipant {
+  id String @id @default(cuid())
+  conversationId String
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  joinedAt DateTime @default(now())
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id String @id @default(cuid())
+  conversationId String
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  senderId String
+  sender User @relation(fields: [senderId], references: [id])
+  content String @db.Text
+  isRead Boolean @default(false)
+  createdAt DateTime @default(now())
+}
+
+model OwnershipTransferRequest {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  sellerId String
+  seller User @relation("Seller", fields: [sellerId], references: [id])
+  buyerId String
+  buyer User @relation("Buyer", fields: [buyerId], references: [id])
+  salePrice Decimal
+  status TransferStatus @default(DRAFT)
+  governmentReference String?
+  paymentReference String?
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  steps OwnershipTransferStep[]
+  documents OwnershipDocument[]
+  payments PaymentTransaction[]
+}
+
+model OwnershipTransferStep {
+  id String @id @default(cuid())
+  requestId String
+  request OwnershipTransferRequest @relation(fields: [requestId], references: [id])
+  step TransferStepType
+  status StepStatus @default(PENDING)
+  message String?
+  metadata Json?
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+}
+
+model OwnershipDocument {
+  id String @id @default(cuid())
+  requestId String
+  request OwnershipTransferRequest @relation(fields: [requestId], references: [id])
+  uploadedBy String
+  documentType DocumentType
+  fileUrl String // private storage path, not public
+  status String @default("PENDING")
+  createdAt DateTime @default(now())
+}
+
+model PaymentTransaction {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  ownershipTransferId String?
+  ownershipTransfer OwnershipTransferRequest? @relation(fields: [ownershipTransferId], references: [id])
+  amount Decimal
+  currency String @default("YER")
+  provider String
+  providerReference String? @unique
+  idempotencyKey String? @unique
+  status PaymentStatus @default(CREATED)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BankAccount {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  bankName String
+  accountIdentifier String // masked, encrypted at app layer
+  accountHolderName String
+  verificationStatus BankVerificationStatus @default(UNVERIFIED)
+  provider String
+  providerReference String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Auction {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  sellerId String
+  seller User @relation(fields: [sellerId], references: [id])
+  startingPrice Decimal
+  currentPrice Decimal
+  minimumIncrement Decimal @default(1000)
+  startAt DateTime
+  endAt DateTime
+  paymentDeadlineAt DateTime?
+  status AuctionStatus @default(DRAFT)
+  winnerId String?
+  winner User? @relation("AuctionWinner", fields: [winnerId], references: [id])
+  winnerBidId String? @unique
+  winnerBid AuctionBid? @relation("AuctionWinnerBid", fields: [winnerBidId], references: [id])
+  bidDepositAmount Decimal?
+  bidDepositCurrency String @default("YER")
+  saleId String? @unique
+  sale VehicleSale? @relation("AuctionSale")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  bids AuctionBid[]
+  autoBids AuctionAutoBid[]
+  bidDeposits AuctionBidDeposit[]
+
+  @@index([status, endAt])
+  @@index([vehicleId, status])
+}
+
+model AuctionBid {
+  id String @id @default(cuid())
+  auctionId String
+  auction Auction @relation(fields: [auctionId], references: [id])
+  bidderId String
+  bidder User @relation(fields: [bidderId], references: [id])
+  amount Decimal
+  idempotencyKey String? @unique
+  createdAt DateTime @default(now())
+
+  winnerOf Auction? @relation("AuctionWinnerBid")
+  deposit AuctionBidDeposit?
+
+  @@index([auctionId, amount])
+  @@index([bidderId, createdAt])
+}
+
+model AuctionAutoBid {
+  id String @id @default(cuid())
+  auctionId String
+  auction Auction @relation(fields: [auctionId], references: [id])
+  bidderId String
+  bidder User @relation(fields: [bidderId], references: [id])
+  maxAmount Decimal
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([auctionId, bidderId])
+  @@index([auctionId, isActive, maxAmount])
+}
+
+enum BidDepositStatus {
+  PENDING
+  HOLD
+  APPLIED
+  RELEASED
+  REFUNDED
+  FORFEITED
+  FAILED
+  NOT_CONFIGURED
+}
+model AuctionBidDeposit {
+  id String @id @default(cuid())
+  auctionId String
+  auction Auction @relation(fields: [auctionId], references: [id])
+  bidId String? @unique
+  bid AuctionBid? @relation(fields: [bidId], references: [id])
+  bidderId String
+  bidder User @relation(fields: [bidderId], references: [id])
+  amount Decimal
+  currency String @default("YER")
+  status BidDepositStatus @default(PENDING)
+  providerReference String?
+  idempotencyKey String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([auctionId, bidderId, status])
+}
+
+model Violation {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  userId String?
+  user User? @relation(fields: [userId], references: [id])
+  externalReference String?
+  type String
+  description String
+  amount Decimal
+  status ViolationStatus @default(PENDING)
+  issuedAt DateTime @default(now())
+  dueAt DateTime?
+}
+
+model Appointment {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  serviceId String
+  service TrafficService @relation(fields: [serviceId], references: [id])
+  date DateTime
+  time String
+  location String
+  status AppointmentStatus @default(PENDING)
+  externalReference String?
+  createdAt DateTime @default(now())
+}
+
+model TrafficService {
+  id String @id @default(cuid())
+  name String
+  description String?
+  type String // OWNERSHIP_TRANSFER, RENEWAL, VIOLATIONS, etc.
+  status String @default("ACTIVE")
+  requiresIdentity Boolean @default(true)
+  requiresVehicle Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  appointments Appointment[]
+}
+
+model Fee {
+  id String @id @default(cuid())
+  serviceType String
+  name String
+  amount Decimal
+  currency String @default("YER")
+  status String @default("ACTIVE")
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+  userId String?
+  user User? @relation(fields: [userId], references: [id])
+  action String
+  entityType String
+  entityId String?
+  metadata Json?
+  ipHash String?
+  createdAt DateTime @default(now())
+}
+
+model IntegrationStatus {
+  id String @id @default(cuid())
+  providerName String @unique // e.g., IDENTITY, PHONE, VEHICLE, BANK, PAYMENT
+  providerType String
+  status ProviderStatus @default(NOT_CONFIGURED)
+  lastCheckedAt DateTime?
+  config Json? // no secrets, only non-sensitive config
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+
+// ==================== NEW TABLES FOR VEHICLE SALE - ADDED MODULARLY - NO BREAKING CHANGES ====================
+
+enum SaleStatus {
+  SALE_CREATED
+  BUYER_PENDING
+  BUYER_ACCEPTED
+  PAYMENT_CONFIRMED
+  PENDING_SELLER
+  BUYER_IDENTIFIED
+  WAITING_BUYER_APPROVAL
+  BUYER_APPROVED
+  BUYER_OTP_VERIFIED
+  WAITING_PAYMENT
+  PAYMENT_PENDING_VERIFICATION
+  PAYMENT_VERIFIED
+  FUNDS_SECURED
+  WAITING_SELLER_CONFIRMATION
+  SELLER_OTP_VERIFIED
+  TRANSFER_IN_PROGRESS
+  OWNERSHIP_TRANSFERRED
+  RELEASE_PENDING
+  RELEASE_READY
+  RELEASE_PROCESSING
+  FUNDS_RELEASED
+  CONTRACT_GENERATED
+  COMPLETED
+  REJECTED
+  CANCELLED
+  PAYMENT_FAILED
+  TRANSFER_FAILED
+  RELEASE_FAILED
+  EXPIRED
+  PAYMENT_PROCESSING
+  ESCROW_HELD
+  TRANSFER_PENDING
+  TRANSFER_BLOCKED
+  HANDOVER_PENDING
+  HANDOVER_CONFIRMED
+  PAYOUT_PROTECTION
+  PAYOUT_PENDING
+  PAYOUT_PROCESSING
+  PAYOUT_CONFIRMED
+  DISPUTED
+  PAYOUT_REVIEW_REQUIRED
+  FAILED
+  MANUAL_REVIEW
+}
+
+enum ExchangeRateSource {
+  MANUAL
+  BANK_API
+  EXTERNAL_PROVIDER
+}
+
+enum OtpType {
+  BUYER
+  SELLER
+}
+
+enum PaymentVerificationStatus {
+  PENDING_RECEIPT
+  PAYMENT_PENDING_VERIFICATION
+  VERIFIED
+  FAILED
+  CANCELLED
+}
+
+model VehicleSale {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  
+  sellerId String
+  seller User @relation("SellerSales", fields: [sellerId], references: [id])
+  sellerName String
+  sellerNationalId String
+  sellerPhone String
+  sellerVerified Boolean @default(false)
+  payoutUserId String?
+  payoutAccountId String?
+  
+  buyerId String?
+  buyer User? @relation("BuyerSales", fields: [buyerId], references: [id])
+  buyerName String?
+  buyerNationalId String?
+  buyerPhone String?
+  buyerVerified Boolean @default(false)
+  buyerApproved Boolean @default(false)
+  
+  vehicleAmountYER Decimal // قيمة المركبة بالريال - يحددها البائع
+  platformFeeUSD Int @default(0)
+  platformFeeYER Decimal @default(0)
+  transferFeeUSD Int @default(80)
+  transferFeeYER Decimal @default(0)
+  listingCommissionUSD Int @default(0)
+  auctionFeeYER Decimal @default(0)
+  governmentFeesYER Decimal @default(0)
+  bidDepositYER Decimal @default(0)
+  totalPaidYER Decimal
+  sellerPayoutYER Decimal
+  platformRevenueYER Decimal
+  
+  exchangeRate Decimal // مثبت وقت العملية
+  exchangeRateId String
+  
+  paymentMethod String @default("BANK_TRANSFER")
+  paymentReceiptId String?
+  paymentVerified Boolean @default(false)
+  fundsSecured Boolean @default(false)
+  
+  buyerOtpId String?
+  buyerOtpVerified Boolean @default(false)
+  sellerOtpId String?
+  sellerOtpVerified Boolean @default(false)
+  
+  escrowTransactionId String?
+  
+  governmentReference String? @unique
+  governmentStatus String?
+  
+  status SaleStatus @default(PENDING_SELLER)
+  statusHistory Json? // Array of status changes
+  
+  vehicleEligible Boolean @default(true)
+  authorizationId String?
+  auctionId String? @unique
+  auction Auction? @relation("AuctionSale", fields: [auctionId], references: [id])
+  handoverConfirmedAt DateTime?
+  payoutProtectionUntil DateTime?
+  
+  contractId String?
+  electronicDocumentUrl String?
+  
+  releaseReadyAt DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expiresAt DateTime
+  
+  payments SalePayment[]
+  auditLogs SaleAuditLog[]
+  contract SaleContract?
+  receipts PaymentReceipt[]
+  
+  @@index([sellerId])
+  @@index([buyerId])
+  @@index([status])
+  @@index([vehicleId])
+}
+
+model SalePayment {
+  id String @id @default(cuid())
+  vehicleSaleId String
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
+  
+  amountYER Decimal
+  method String
+  status String @default("PENDING")
+  
+  escrowTransactionId String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([vehicleSaleId])
+}
+
+model PaymentReceipt {
+  id String @id @default(cuid())
+  vehicleSaleId String
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
+  
+  amountYER Decimal
+  method String
+  receiptUrl String?
+  receiptFileName String?
+  uploadedAt DateTime @default(now())
+  uploadedBy String
+  status PaymentVerificationStatus @default(PAYMENT_PENDING_VERIFICATION)
+  verifiedBy String?
+  verifiedAt DateTime?
+  verificationNotes String?
+  bankReference String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([vehicleSaleId])
+  @@index([status])
+}
+
+model SaleAuditLog {
+  id String @id @default(cuid())
+  vehicleSaleId String
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
+  
+  userId String
+  userName String
+  action String
+  oldStatus SaleStatus?
+  newStatus SaleStatus
+  reference String?
+  metadata Json?
+  
+  createdAt DateTime @default(now())
+  
+  @@index([vehicleSaleId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model SaleContract {
+  id String @id @default(cuid())
+  vehicleSaleId String @unique
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
+  
+  contractNumber String @unique
+  operationId String
+  
+  contractData Json // Full contract data
+  htmlContent String? @db.Text
+  
+  status String @default("DRAFT")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([contractNumber])
+  @@index([vehicleSaleId])
+}
+
+model ExchangeRate {
+  id String @id @default(cuid())
+  usdToYer Decimal
+  source ExchangeRateSource @default(MANUAL)
+  isAutoUpdateEnabled Boolean @default(false)
+  updatedBy String
+  updatedByName String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  history ExchangeRateHistory[]
+}
+
+model ExchangeRateHistory {
+  id String @id @default(cuid())
+  exchangeRateId String
+  exchangeRate ExchangeRate @relation(fields: [exchangeRateId], references: [id])
+  
+  oldRate Decimal
+  newRate Decimal
+  changedBy String
+  changedByName String
+  reason String?
+  
+  createdAt DateTime @default(now())
+  
+  @@index([exchangeRateId])
+}
+
+model OtpRecord {
+  id String @id @default(cuid())
+  operationId String
+  type OtpType
+  phone String
+  userId String?
+  otpHash String
+  user User? @relation(fields: [userId], references: [id])
+  channel String @default("SMS")
+  providerReference String?
+  attempts Int @default(0)
+  maxAttempts Int @default(5)
+  resendAvailableAt DateTime
+  requestIpHash String?
+  deviceHash String?
+  expiresAt DateTime
+  verifiedAt DateTime?
+  isUsed Boolean @default(false)
+  createdAt DateTime @default(now())
+  
+  @@index([operationId])
+  @@index([phone])
+  @@index([expiresAt])
+  @@index([requestIpHash, createdAt])
+  @@index([deviceHash, createdAt])
+  @@index([operationId, type, createdAt])
+}
+
+// Add relations to existing User and Vehicle models - SAFE EXTENSIONS
+// We add new relations without modifying old fields
+
+// Note: Existing User model will get new relations via extension in application layer
+// Prisma requires we add relation fields - we do it safely with optional
+
+model EscrowAccount {
+  id String @id @default(cuid())
+  totalHeldUSD Decimal @default(0) // Production balance must come from real ledger/provider, never seeded as a real customer balance
+  totalHeldYER Decimal @default(0)
+  currency String @default("USD")
+  status String @default("HELD")
+  legacyReferenceUSD Decimal?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EscrowTransaction {
+  id String @id @default(cuid())
+  vehicleSaleId String
+  
+  vehicleAmountYER Decimal
+  platformFeeUSD Int @default(0)
+  platformFeeYER Decimal @default(0)
+  transferFeeUSD Int @default(80)
+  transferFeeYER Decimal @default(0)
+  listingCommissionUSD Int @default(0)
+  auctionFeeYER Decimal @default(0)
+  governmentFeesYER Decimal @default(0)
+  totalPaidYER Decimal
+  sellerPayoutYER Decimal
+  platformRevenueYER Decimal
+  exchangeRate Decimal
+  
+  status String @default("HELD")
+  paymentProviderReference String?
+  
+  createdAt DateTime @default(now())
+  securedAt DateTime?
+  releaseReadyAt DateTime?
+  updatedAt DateTime @updatedAt
+  
+  @@index([vehicleSaleId])
+  @@index([status])
+}
+
+
+// ==================== V12 HARDENED USER EXPERIENCE ====================
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_USER
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  type String
+  title String
+  message String @db.Text
+  priority String @default("NORMAL")
+  operationId String?
+  data Json?
+  isRead Boolean @default(false)
+  readAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@index([operationId])
+}
+
+model SupportTicket {
+  id String @id @default(cuid())
+  ticketNumber String @unique
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  category String
+  subject String
+  description String @db.Text
+  status SupportTicketStatus @default(OPEN)
+  priority SupportTicketPriority @default(NORMAL)
+  lastReplyAt DateTime?
+  closedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages SupportMessage[]
+  attachments SupportAttachment[]
+
+  @@index([userId, status])
+  @@index([status, priority])
+  @@index([createdAt])
+}
+
+model SupportAttachment {
+  id String @id @default(cuid())
+  ticketId String
+  ticket SupportTicket @relation(fields: [ticketId], references: [id])
+  uploadedBy String
+  storageKey String
+  fileName String
+  mimeType String
+  sizeBytes Int
+  sha256Hash String
+  createdAt DateTime @default(now())
+  @@index([ticketId, createdAt])
+}
+
+model SupportMessage {
+  id String @id @default(cuid())
+  ticketId String
+  ticket SupportTicket @relation(fields: [ticketId], references: [id])
+  senderId String
+  sender User @relation(fields: [senderId], references: [id])
+  content String @db.Text
+  isInternal Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+
+enum ListingType {
+  DIRECT
+  MARKET
+  EXHIBITION
+  AUCTION
+}
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  SOLD
+  UNPUBLISHED
+  EXPIRED
+}
+enum AuthorizationType {
+  SELL_ONLY
+  SELL_AND_RECEIVE
+}
+enum AuthorizationStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  REVOKED
+  EXPIRED
+}
+enum LedgerEntryType {
+  CUSTOMER_FUNDS
+  ESCROW_FUNDS
+  PLATFORM_FEES
+  SELLER_PAYOUTS
+  REFUNDS
+  GOVERNMENT_FEES
+  AUCTION_FEES
+  TRANSFER_FEES
+  LISTING_SALES_COMMISSION
+}
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+}
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+enum OperationStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  MANUAL_REVIEW
+  NOT_CONFIGURED
+}
+model VehicleListing {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  creatorId String
+  creator User @relation("ListingCreator", fields: [creatorId], references: [id])
+  listingType ListingType
+  status ListingStatus @default(DRAFT)
+  price Decimal
+  currency String @default("YER")
+  aiDescription String? @db.Text
+  source String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  soldAt DateTime?
+  views ListingView[]
+  comments Comment[]
+  @@index([vehicleId, status])
+  @@index([creatorId, status])
+  @@index([listingType, status])
+}
+
+model VehicleAuthorization {
+  id String @id @default(cuid())
+  authorizationNumber String @unique
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  ownerId String
+  owner User @relation("AuthorizationOwner", fields: [ownerId], references: [id])
+  authorizedUserId String
+  authorizedUser User @relation("AuthorizationAuthorized", fields: [authorizedUserId], references: [id])
+  type AuthorizationType
+  status AuthorizationStatus @default(PENDING)
+  minPrice Decimal?
+  validUntil DateTime
+  termsVersion String
+  pdfUrl String?
+  qrValue String?
+  sha256Hash String?
+  acceptedAt DateTime?
+  ownerConsentAt DateTime?
+  ownerOtpVerifiedAt DateTime?
+  authorizedOtpVerifiedAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([vehicleId, status])
+  @@index([authorizedUserId, status])
+}
+
+model PayoutAccount {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  provider String
+  accountIdentifierEncrypted String
+  accountIdentifierMasked String
+  accountHolderName String
+  verified Boolean @default(false)
+  nameMatchStatus String @default("PENDING")
+  providerReference String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId, verified])
+}
+
+model FinancialLedger {
+  id String @id @default(cuid())
+  transactionId String
+  entryGroupId String
+  userId String?
+  user User? @relation(fields: [userId], references: [id])
+  entryType LedgerEntryType
+  direction String
+  amount Decimal
+  currency String
+  providerRef String?
+  idempotencyKey String @unique
+  relatedOperationId String?
+  metadata Json?
+  createdAt DateTime @default(now())
+  @@index([transactionId])
+  @@index([entryGroupId])
+  @@index([relatedOperationId])
+  @@unique([entryGroupId, direction])
+}
+
+model HandoverEvidence {
+  id String @id @default(cuid())
+  saleTransactionId String
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  buyerId String
+  buyer User @relation("HandoverBuyer", fields: [buyerId], references: [id])
+  sellerId String
+  seller User @relation("HandoverSeller", fields: [sellerId], references: [id])
+  buyerOtpVerifiedAt DateTime?
+  sellerOtpVerifiedAt DateTime?
+  buyerNotes String?
+  sellerNotes String?
+  recordedMileage Int?
+  photoUrls Json?
+  confirmedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([saleTransactionId])
+}
+
+model Invoice {
+  id String @id @default(cuid())
+  invoiceNumber String @unique
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  saleTransactionId String?
+  receiptHash String? @unique
+  verificationUrl String?
+  qrCode String?
+  vehiclePriceYER Decimal
+  listingCommissionUSD Decimal @default(0)
+  transferFeeUSD Decimal @default(0)
+  auctionFeeYER Decimal @default(0)
+  governmentFeeYER Decimal @default(0)
+  taxYER Decimal @default(0)
+  exchangeRateSnapshot Decimal
+  totalYER Decimal
+  currency String @default("YER")
+  status String @default("ISSUED")
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+}
+
+model Dispute {
+  id String @id @default(cuid())
+  operationId String
+  userId String
+  user User @relation("DisputeUser", fields: [userId], references: [id])
+  status DisputeStatus @default(OPEN)
+  reason String
+  description String @db.Text
+  payoutFrozen Boolean @default(true)
+  resolution String?
+  createdAt DateTime @default(now())
+  resolvedAt DateTime?
+  @@index([operationId, status])
+}
+
+model RiskEvent {
+  id String @id @default(cuid())
+  userId String?
+  user User? @relation(fields: [userId], references: [id])
+  operationId String?
+  eventType String
+  level RiskLevel
+  score Int @default(0)
+  metadata Json?
+  createdAt DateTime @default(now())
+  @@index([level, createdAt])
+  @@index([userId, createdAt])
+}
+
+model VehiclePriceHistory {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  price Decimal
+  currency String @default("YER")
+  source String?
+  createdAt DateTime @default(now())
+  @@index([vehicleId, createdAt])
+}
+
+model RateLimitBucket {
+  id String @id @default(cuid())
+  key String @unique
+  windowStart DateTime
+  count Int @default(0)
+  updatedAt DateTime @updatedAt
+  @@index([windowStart])
+}
+
+model Operation {
+  id String @id @default(cuid())
+  operationNumber String @unique
+  type String
+  userId String
+  user User @relation("OperationCreator", fields: [userId], references: [id])
+  status OperationStatus @default(PENDING)
+  providerReference String?
+  idempotencyKey String? @unique
+  metadata Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([userId, createdAt])
+}
+
+
+model PasswordResetRequest {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  otpId String
+  operationId String @unique
+  recoveryTokenHash String @unique
+  riskLevel RiskLevel @default(LOW)
+  verifiedAt DateTime?
+  completedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([userId, createdAt])
+  @@index([otpId])
+}
+
+
+model VehicleMedia {
+  id String @id @default(cuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  uploadedBy String
+  mediaType String
+  originalStorageKey String
+  optimizedStorageKey String?
+  mimeType String
+  sizeBytes Int
+  sha256Hash String
+  width Int?
+  height Int?
+  plateDetectionStatus String @default("NOT_CONFIGURED")
+  publicStatus String @default("PRIVATE")
+  createdAt DateTime @default(now())
+  @@index([vehicleId, createdAt])
+  @@index([sha256Hash])
+}
+
+model ListingView {
+  id String @id @default(cuid())
+  listingId String
+  listing VehicleListing @relation(fields: [listingId], references: [id])
+  vehicleId String
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+  userId String?
+  user User? @relation(fields: [userId], references: [id])
+  source String
+  referrer String?
+  deviceHash String?
+  sessionHash String?
+  createdAt DateTime @default(now())
+  @@index([listingId, createdAt])
+  @@index([source, createdAt])
+}
+
+model Comment {
+  id String @id @default(cuid())
+  listingId String
+  listing VehicleListing @relation(fields: [listingId], references: [id])
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  content String @db.Text
+  status String @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reports CommentReport[]
+  @@index([listingId, createdAt])
+}
+
+model CommentReport {
+  id String @id @default(cuid())
+  commentId String
+  comment Comment @relation(fields: [commentId], references: [id])
+  reporterId String
+  reporter User @relation("CommentReports", fields: [reporterId], references: [id])
+  reason String
+  createdAt DateTime @default(now())
+  @@index([commentId, createdAt])
+}

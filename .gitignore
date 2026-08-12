@@ -1,0 +1,4 @@
+.replit
+/scripts/post-merge.sh
+*.tsbuildinfo
+*.bak

@@ -1,0 +1,16 @@
+import { db } from './db';
+export type ExchangeRateSource='MANUAL'|'BANK_API'|'EXTERNAL_PROVIDER';
+export interface ExchangeRate { id:string; usdToYer:number; source:ExchangeRateSource; isAutoUpdateEnabled:boolean; updatedBy:string; updatedByName:string; createdAt:Date; updatedAt:Date; }
+export interface ExchangeRateHistory { id:string; oldRate:number; newRate:number; changedBy:string; changedByName:string; reason?:string; createdAt:Date; }
+function map(r:any):ExchangeRate{return {id:r.id,usdToYer:Number(r.usdToYer),source:r.source,isAutoUpdateEnabled:r.isAutoUpdateEnabled,updatedBy:r.updatedBy,updatedByName:r.updatedByName,createdAt:r.createdAt,updatedAt:r.updatedAt};}
+export class ExchangeRateProvider {
+  async getCurrentRate():Promise<ExchangeRate>{let r=await db.exchangeRate.findFirst({orderBy:{updatedAt:'desc'}});if(!r){r=await db.exchangeRate.create({data:{usdToYer:Number(process.env.EXCHANGE_RATE_DEFAULT||535),source:'MANUAL',isAutoUpdateEnabled:false,updatedBy:'SYSTEM',updatedByName:'SYSTEM'}});}return map(r);}
+  async updateRate(params:{newRate:number;updatedBy:string;updatedByName:string;reason?:string;source?:ExchangeRateSource}){if(!Number.isFinite(params.newRate)||params.newRate<=0)throw new Error('EXCHANGE_RATE_INVALID');return db.$transaction(async tx=>{const current=await tx.exchangeRate.findFirst({orderBy:{updatedAt:'desc'}});if(!current)throw new Error('EXCHANGE_RATE_NOT_CONFIGURED');const updated=await tx.exchangeRate.create({data:{usdToYer:params.newRate,source:params.source||'MANUAL',isAutoUpdateEnabled:current.isAutoUpdateEnabled,updatedBy:params.updatedBy,updatedByName:params.updatedByName}});const history=await tx.exchangeRateHistory.create({data:{exchangeRateId:updated.id,oldRate:current.usdToYer,newRate:params.newRate,changedBy:params.updatedBy,changedByName:params.updatedByName,reason:params.reason}});return {oldRate:map(current),newRate:map(updated),history:{id:history.id,oldRate:Number(history.oldRate),newRate:Number(history.newRate),changedBy:history.changedBy,changedByName:history.changedByName,reason:history.reason??undefined,createdAt:history.createdAt}};});}
+  async setAutoUpdate(enabled:boolean,updatedBy:string,updatedByName:string){const current=await this.getCurrentRate();return db.exchangeRate.update({where:{id:current.id},data:{isAutoUpdateEnabled:enabled,updatedBy,updatedByName}}).then(map);}
+  async calculatePlatformFeeYER(platformFeeUSD=0){const current=await this.getCurrentRate();return platformFeeUSD*current.usdToYer;}
+  async freezeRateForOperation(){const current=await this.getCurrentRate();return {rate:current.usdToYer,rateId:current.id,snapshotAt:new Date()};}
+  async getHistory(){const rows=await db.exchangeRateHistory.findMany({orderBy:{createdAt:'desc'},take:500});return rows.map(r=>({id:r.id,oldRate:Number(r.oldRate),newRate:Number(r.newRate),changedBy:r.changedBy,changedByName:r.changedByName,reason:r.reason??undefined,createdAt:r.createdAt}));}
+  async fetchFromBankAPI():Promise<number>{throw new Error('NOT_CONFIGURED:BANK_RATE_PROVIDER_REQUIRED');}
+  async fetchFromExternalProvider():Promise<number>{throw new Error('NOT_CONFIGURED:EXTERNAL_RATE_PROVIDER_REQUIRED');}
+}
+export const exchangeRateProvider=new ExchangeRateProvider();
