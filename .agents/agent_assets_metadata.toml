@@ -1,9 +1,0 @@
-uploads = []
-generated = []
-
-[[outputs]]
-id = "NQtM6K_tkdvsevFzQ6PGG"
-uri = "file://markabat_v4_report.pdf"
-type = "pdf"
-title = "MARKABAT V4 — تقرير الحالة الكاملة"
-description = "تقرير شامل يغطي Git، TypeScript، Prisma، PostgreSQL، الاختبارات، Providers، GitHub Actions، وحكم PARTIALLY VERIFIED النهائي."
