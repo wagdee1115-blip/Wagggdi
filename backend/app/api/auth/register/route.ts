@@ -4,7 +4,8 @@ import { registerSchema } from '@/lib/validations';
 import { cookies } from 'next/headers';
 import { consumeRateLimit } from '@/lib/rate-limit';
 import { getTrustedClientIp, rateLimitTarget } from '@/lib/request-identity';
-export const REGISTRATION_DUPLICATE_RESPONSE = { ok:false, error:'REGISTRATION_UNAVAILABLE' } as const;
+import { REGISTRATION_DUPLICATE_RESPONSE } from '@/lib/auth-public-contracts';
+
 export async function POST(req: Request) {
   try {
     const parsed = registerSchema.safeParse(await req.json());
