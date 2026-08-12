@@ -8,12 +8,15 @@ type DbClient = Prisma.TransactionClient | typeof db;
  * PostgreSQL advisory transaction locks serialize concurrent writers for the
  * same entryGroupId before checking/creating the two legs.
  */
+type LedgerEntry = Awaited<ReturnType<Prisma.TransactionClient['financialLedger']['create']>>;
+type DoubleEntryResult = { replayed: boolean; entries: LedgerEntry[] };
+
 export async function createDoubleEntry(params: {
   transactionId: string; entryGroupId: string; amount: Prisma.Decimal | number | string; currency: string;
   debitType: string; creditType: string; userId?: string; relatedOperationId?: string; providerRef?: string;
   idempotencyKey: string; metadata?: Prisma.InputJsonValue;
-}, client: DbClient = db) {
-  if (client === db) return db.$transaction(tx => createDoubleEntry(params, tx));
+}, client: DbClient = db): Promise<DoubleEntryResult> {
+  if (client === db) return db.$transaction((tx): Promise<DoubleEntryResult> => createDoubleEntry(params, tx));
 
   const amount = new Prisma.Decimal(params.amount);
   if (amount.lte(0)) throw new Error('LEDGER_AMOUNT_MUST_BE_POSITIVE');
