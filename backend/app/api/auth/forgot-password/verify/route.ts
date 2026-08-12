@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { verifyPasswordResetOtp } from '@/lib/password-recovery';
 
-const schema = z.object({ requestId: z.string(), otp: z.string().regex(/^\d{4}$/) });
+const schema = z.object({ recoveryToken: z.string().min(40).max(100), otp: z.string().regex(/^\d{4}$/) });
 
 export async function POST(req: Request) {
   try {
