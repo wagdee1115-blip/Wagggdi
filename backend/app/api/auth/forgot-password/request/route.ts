@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { createRecoveryToken, requestPasswordReset } from '../../../../lib/password-recovery';
-import { getTrustedClientIp } from '../../../../lib/request-identity';
+import { createRecoveryToken, requestPasswordReset } from '../../../../../lib/password-recovery';
+import { getTrustedClientIp } from '../../../../../lib/request-identity';
 
 const schema = z.object({ phone: z.string().min(7), deviceId: z.string().max(200).optional() });
 export function passwordResetPublicResponse(recoveryToken: string) {
