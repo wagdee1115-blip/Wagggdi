@@ -19,10 +19,22 @@ describe('Financial integrity', () => {
     try {
       const first = await confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}`, 1042800);
       expect(first.status).toBe('ESCROW_HELD');
-      const replay = await confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}-2`, 1042800);
+      const replay = await confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}`, 1042800);
       expect(replay.status).toBe('ESCROW_HELD');
+      await expect(confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}`, 1)).rejects.toThrow('PAYMENT_AMOUNT_MISMATCH');
+      await expect(confirmSalePayment(sale.id, `PROVIDER-OTHER-${suffix}`, `IDEMP-${suffix}`, 1042800)).rejects.toThrow('PAYMENT_PROVIDER_REFERENCE_MISMATCH');
+      await expect(confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-OTHER-${suffix}`, 1042800)).rejects.toThrow('IDEMPOTENCY_KEY_REUSED');
       expect(await db.paymentTransaction.count({ where: { providerReference: `PROVIDER-${suffix}` } })).toBe(1);
       expect(await db.financialLedger.count({ where: { transactionId: sale.id } })).toBe(4);
+
+      const second = await db.vehicleSale.create({ data: { vehicleId: vehicle.id, sellerId: seller.id, sellerName: seller.fullName, sellerNationalId: '', sellerPhone: seller.phone, sellerVerified: true, payoutUserId: seller.id, buyerId: buyer.id, buyerName: buyer.fullName, buyerNationalId: '', buyerPhone: buyer.phone, buyerVerified: true, buyerApproved: true, buyerOtpVerified: true, vehicleAmountYER: 1000000, platformFeeUSD: 0, platformFeeYER: 0, transferFeeUSD: 80, transferFeeYER: 42800, listingCommissionUSD: 0, auctionFeeYER: 0, governmentFeesYER: 0, totalPaidYER: 1042800, sellerPayoutYER: 1000000, platformRevenueYER: 42800, exchangeRate: 535, exchangeRateId: rate.id, status: 'BUYER_ACCEPTED', expiresAt: new Date(Date.now()+2*60*60*1000) } });
+      try {
+        await expect(confirmSalePayment(second.id, `PROVIDER-${suffix}`, `IDEMP-CROSS-${suffix}`, 1042800)).rejects.toThrow('ALREADY_PROCESSED');
+        await expect(confirmSalePayment(second.id, `PROVIDER-CROSS-${suffix}`, `IDEMP-${suffix}`, 1042800)).rejects.toThrow('IDEMPOTENCY_KEY_REUSED');
+      } finally {
+        await db.saleAuditLog.deleteMany({ where: { vehicleSaleId: second.id } });
+        await db.vehicleSale.delete({ where: { id: second.id } });
+      }
     } finally {
       await db.financialLedger.deleteMany({ where: { transactionId: sale.id } });
       await db.paymentTransaction.deleteMany({ where: { ownershipTransferId: null, providerReference: `PROVIDER-${suffix}` } });

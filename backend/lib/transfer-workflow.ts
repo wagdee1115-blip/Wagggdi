@@ -199,18 +199,31 @@ export async function confirmSalePayment(saleId: string, providerReference: stri
     if (!sale) throw new Error('SALE_NOT_FOUND');
     const now = new Date();
     if (sale.expiresAt <= now) throw new Error('SALE_EXPIRED');
+    if (!providerReference || !idempotencyKey) throw new Error('PAYMENT_REFERENCE_REQUIRED');
+    if (providerAmountYER === undefined) throw new Error('PAYMENT_AMOUNT_REQUIRED');
+    if (!new Prisma.Decimal(providerAmountYER).eq(sale.totalPaidYER)) throw new Error('PAYMENT_AMOUNT_MISMATCH');
+
+    const [existingByProvider, existingByIdempotency] = await Promise.all([
+      tx.paymentTransaction.findUnique({ where: { providerReference } }),
+      tx.paymentTransaction.findUnique({ where: { idempotencyKey } }),
+    ]);
+    const completed = sale.status === 'ESCROW_HELD' || sale.fundsSecured;
+    if (completed) {
+      if (!existingByProvider) throw new Error('PAYMENT_PROVIDER_REFERENCE_MISMATCH');
+      if (!existingByIdempotency || existingByIdempotency.id !== existingByProvider.id) throw new Error('IDEMPOTENCY_KEY_REUSED');
+      const boundLedger = await tx.financialLedger.findFirst({ where: {
+        entryGroupId: `PAYMENT:${sale.id}`, relatedOperationId: sale.id, providerRef: providerReference,
+      }});
+      if (!boundLedger || existingByProvider.userId !== sale.buyerId || existingByProvider.currency !== 'YER' || !existingByProvider.amount.eq(sale.totalPaidYER)) {
+        throw new Error('PAYMENT_SALE_MISMATCH');
+      }
+      return sale;
+    }
     if (!['BUYER_ACCEPTED', 'PAYMENT_PROCESSING', 'WAITING_PAYMENT', 'PAYMENT_PENDING_VERIFICATION', 'PAYMENT_VERIFIED'].includes(sale.status)) {
-      if (sale.status === 'ESCROW_HELD' || sale.fundsSecured) return sale;
       throw new Error(`INVALID_PAYMENT_STATE:${sale.status}`);
     }
     if (!sale.buyerOtpVerified && !sale.auctionId) throw new Error('BUYER_OTP_REQUIRED');
-    if (providerAmountYER !== undefined && !new Prisma.Decimal(providerAmountYER).eq(sale.totalPaidYER)) throw new Error('PAYMENT_AMOUNT_MISMATCH');
-    if (providerAmountYER === undefined) throw new Error('PAYMENT_AMOUNT_REQUIRED');
-    if (!providerReference || !idempotencyKey) throw new Error('PAYMENT_REFERENCE_REQUIRED');
-
-    const existingByProvider = await tx.paymentTransaction.findFirst({ where: { providerReference } });
     if (existingByProvider) throw new Error('ALREADY_PROCESSED');
-    const existingByIdempotency = await tx.paymentTransaction.findUnique({ where: { idempotencyKey } });
     if (existingByIdempotency) {
       if (existingByIdempotency.providerReference !== providerReference) throw new Error('IDEMPOTENCY_KEY_REUSED');
       throw new Error('ALREADY_PROCESSED');
@@ -237,7 +250,7 @@ export async function confirmSalePayment(saleId: string, providerReference: stri
 
 export async function confirmOwnershipTransfer(saleId: string, providerReference: string) {
   if (!process.env.TRAFFIC_PROVIDER_URL || !process.env.TRAFFIC_PROVIDER_SECRET) throw new Error('NOT_CONFIGURED:TRAFFIC_PROVIDER_REQUIRED');
-  return db.$transaction(async tx => {
+  try { return await db.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "VehicleSale" WHERE id = ${saleId} FOR UPDATE`;
     const sale = await tx.vehicleSale.findUnique({ where: { id: saleId } });
     if (!sale || !sale.buyerId) throw new Error('SALE_NOT_FOUND');
@@ -255,7 +268,10 @@ export async function confirmOwnershipTransfer(saleId: string, providerReference
     const now = new Date();
     const history = Array.isArray(sale.statusHistory) ? sale.statusHistory : [];
     return tx.vehicleSale.update({ where: { id: saleId }, data: { governmentReference: providerReference, governmentStatus: 'TRANSFERRED', status: 'HANDOVER_PENDING', statusHistory: [...history, { event: 'OWNERSHIP_TRANSFERRED', at: now.toISOString(), providerReference }, { event: 'HANDOVER_PENDING', at: now.toISOString(), providerReference }] } });
-  });
+  }); } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new Error('TRAFFIC_PROVIDER_REFERENCE_REPLAY');
+    throw error;
+  }
 }
 
 export async function confirmHandover(params: { saleId: string; actorId: string; buyerOtpId: string; buyerOtp: string; sellerOtpId: string; sellerOtp: string; qrValue: string; mileage: number; photos?: Prisma.InputJsonValue; notes?: string }) {
