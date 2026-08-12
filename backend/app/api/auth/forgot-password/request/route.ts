@@ -1,11 +1,9 @@
 import { z } from 'zod';
 import { createRecoveryToken, requestPasswordReset } from '../../../../../lib/password-recovery';
 import { getTrustedClientIp } from '../../../../../lib/request-identity';
+import { passwordResetPublicResponse } from '../../../../../lib/auth-public-contracts';
 
 const schema = z.object({ phone: z.string().min(7), deviceId: z.string().max(200).optional() });
-export function passwordResetPublicResponse(recoveryToken: string) {
-  return { ok: true, message: 'IF_ACCOUNT_EXISTS_RESET_INSTRUCTIONS_WILL_BE_SENT', recoveryToken } as const;
-}
 
 export async function POST(req: Request) {
   try {
