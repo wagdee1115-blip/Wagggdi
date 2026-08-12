@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { isActiveAccount, isOnboardingAccount } from '../lib/api-auth';
 import { getTrustedClientIp, rateLimitTarget } from '../lib/request-identity';
-import { passwordResetPublicResponse } from '../app/api/auth/forgot-password/request/route';
-import { REGISTRATION_DUPLICATE_RESPONSE } from '../app/api/auth/register/route';
+import { passwordResetPublicResponse, REGISTRATION_DUPLICATE_RESPONSE } from '../lib/auth-public-contracts';
 import { consumeRateLimit } from '../lib/rate-limit';
 
 describe('P0 account-status boundary', () => {
