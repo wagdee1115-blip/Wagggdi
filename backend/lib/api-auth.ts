@@ -36,7 +36,7 @@ export async function getOnboardingUser() {
   const payload = await verifyJwt(token);
   if (!payload?.sub || payload.sessionType !== 'REGISTRATION' || payload.role !== 'USER') return null;
   const user = await db.user.findUnique({ where: { id: String(payload.sub) } });
-  if (!isOnboardingAccount(user)) return null;
+  if (!user || !isOnboardingAccount(user)) return null;
   if (Number(payload.sessionVersion) !== user.sessionVersion) return null;
   return user;
 }
