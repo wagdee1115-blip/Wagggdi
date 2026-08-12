@@ -1,8 +1,8 @@
 import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
 import { db } from '../lib/db';
+import { passwordResetPublicResponse } from '../lib/auth-public-contracts';
 import { hashRecoveryToken, verifyPasswordResetOtp } from '../lib/password-recovery';
-import { passwordResetPublicResponse } from '../app/api/auth/forgot-password/request/route';
 
 describe('opaque password recovery flow', () => {
   it('uses an indistinguishable public response for existing and nonexistent targets', () => {
