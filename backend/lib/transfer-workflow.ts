@@ -122,11 +122,15 @@ export async function createOwnershipTransfer(params: {
     if (!exchange) throw new Error('EXCHANGE_RATE_NOT_CONFIGURED');
 
     const payoutUserId = authorityType === 'SELL_ONLY' ? vehicle.ownerId : params.sellerId;
-    if (authorityType === 'SELL_AND_RECEIVE') await assertPayoutAccount(tx, payoutUserId);
 
     // The vehicleId predicate is the authoritative atomic reservation guard.
     const locked = await tx.vehicle.updateMany({ where: { id: params.vehicleId, status: 'ACTIVE', isReserved: false }, data: { status: 'PENDING', isReserved: true } });
     if (locked.count !== 1) throw new Error('VEHICLE_ALREADY_LOCKED');
+
+    // Payout guard runs AFTER the atomic lock so lock-race semantics are unchanged
+    // (the loser still gets VEHICLE_ALREADY_LOCKED). On failure the whole transaction
+    // rolls back, which also reverts the reservation above — no leaked lock, no sale.
+    await assertPayoutAccount(tx, payoutUserId);
 
     const price = new Prisma.Decimal(params.salePrice);
     const listingType = params.listingType ?? (params.auctionId ? 'AUCTION' : 'MARKET');
