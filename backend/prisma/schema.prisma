@@ -759,7 +759,7 @@ model VehicleSale {
 model SalePayment {
   id String @id @default(cuid())
   vehicleSaleId String
-  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id], onDelete: Cascade)
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
   
   amountYER Decimal
   method String
@@ -776,7 +776,7 @@ model SalePayment {
 model PaymentReceipt {
   id String @id @default(cuid())
   vehicleSaleId String
-  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id], onDelete: Cascade)
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
   
   amountYER Decimal
   method String
@@ -800,7 +800,7 @@ model PaymentReceipt {
 model SaleAuditLog {
   id String @id @default(cuid())
   vehicleSaleId String
-  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id], onDelete: Cascade)
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
   
   userId String
   userName String
@@ -820,7 +820,7 @@ model SaleAuditLog {
 model SaleContract {
   id String @id @default(cuid())
   vehicleSaleId String @unique
-  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id], onDelete: Cascade)
+  vehicleSale VehicleSale @relation(fields: [vehicleSaleId], references: [id])
   
   contractNumber String @unique
   operationId String
