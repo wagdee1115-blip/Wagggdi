@@ -723,7 +723,7 @@ model VehicleSale {
   
   escrowTransactionId String?
   
-  governmentReference String?
+  governmentReference String? @unique
   governmentStatus String?
   
   status SaleStatus @default(PENDING_SELLER)

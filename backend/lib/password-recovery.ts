@@ -2,19 +2,20 @@ import { db } from './db';
 import { otpService } from './otp';
 import { hashPassword, signPasswordResetJwt } from './auth';
 import { consumeRateLimit } from './rate-limit';
+import { rateLimitTarget } from './request-identity';
 
 const SENSITIVE_ROLES = new Set(['OWNER', 'SUPER_ADMIN', 'ADMIN', 'FINANCE', 'SUPPORT']);
 
-export async function requestPasswordReset(params: { phone: string; ip?: string; deviceId?: string }) {
+export async function requestPasswordReset(params: { phone: string; ip?: string }) {
+  await consumeRateLimit(`forgot-password:target:${rateLimitTarget(params.phone)}`, 5, 60 * 60 * 1000);
   if (params.ip) await consumeRateLimit(`forgot-password:ip:${params.ip}`, 10, 60 * 60 * 1000);
-  if (params.deviceId) await consumeRateLimit(`forgot-password:device:${params.deviceId}`, 10, 60 * 60 * 1000);
   const user = await db.user.findUnique({ where: { phone: params.phone } });
-  if (!user) throw new Error('ACCOUNT_NOT_FOUND');
+  if (!user) return;
   const riskLevel = SENSITIVE_ROLES.has(user.role) ? 'HIGH' : 'LOW';
   const operationId = `PASSWORD_RESET:${user.id}:${Date.now()}`;
-  const otp = await otpService.sendOtp({ phone: user.phone, operationId, type: 'BUYER', ip: params.ip, deviceId: params.deviceId, userId: user.id });
-  const row = await db.passwordResetRequest.create({ data: { userId: user.id, otpId: otp.otpId, operationId, riskLevel, expiresAt: otp.expiresAt } });
-  return { requestId: row.id, expiresAt: row.expiresAt, riskLevel: row.riskLevel };
+  const otp = await otpService.sendOtp({ phone: user.phone, operationId, type: 'BUYER', ip: params.ip, userId: user.id });
+  await db.passwordResetRequest.create({ data: { userId: user.id, otpId: otp.otpId, operationId, riskLevel, expiresAt: otp.expiresAt } });
+  return;
 }
 
 export async function verifyPasswordResetOtp(params: { requestId: string; otp: string }) {
