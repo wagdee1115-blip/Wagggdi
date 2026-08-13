@@ -11,7 +11,6 @@ describe('Direct Sale canonical state machine', () => {
     expect(canRequestSaleStatus('USER', 'PAYOUT_CONFIRMED')).toBe(false);
     expect(canRequestSaleStatus('FINANCE', 'PAYMENT_CONFIRMED')).toBe(true);
   });
-
   it('allows the required forward path', () => {
     const path = [
       ['SALE_CREATED', 'BUYER_PENDING'],
