@@ -28,6 +28,6 @@ describe('database URL routing', () => {
   });
 
   it('allows Prisma to keep its normal missing-env failure behavior', () => {
-    expect(resolveDatabaseUrl(undefined, 'preview')).toBeUndefined();
+    expect(resolveDatabaseUrl('', 'preview')).toBeUndefined();
   });
 });
