@@ -1,0 +1,80 @@
+name: MARKABAT Production Database Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type MIGRATE_PRODUCTION to authorize prisma migrate deploy'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: markabat-production-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Guarded Prisma production migration
+    if: ${{ inputs.confirm == 'MIGRATE_PRODUCTION' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Require production database secret
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::DATABASE_URL is not configured for the protected GitHub production environment."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::warning::package-lock.json is missing; using npm install."
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Show migration status before deploy
+        run: npx prisma migrate status || true
+
+      - name: Apply committed migrations only
+        run: npx prisma migrate deploy
+
+      - name: Verify migration status after deploy
+        run: npx prisma migrate status
+
+      - name: Migration summary
+        run: |
+          echo "Production migration workflow completed successfully."
+          echo "No prisma migrate reset or prisma db push was executed."
