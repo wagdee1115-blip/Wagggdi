@@ -1,0 +1,87 @@
+name: markabat-wave1-finalize
+
+on:
+  push:
+    branches:
+      - markabat-v4-phase2-wave1-fix
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message, '[wave1-backend-assembled]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: markabat-v4-phase2-wave1-fix
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+      - name: Assemble exact Wave 1 backend tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=e4a89d7ed1fbc15454831861450ae062db0ed7f1
+          fetch_blob() {
+            local sha="$1" out="$2"
+            mkdir -p "$(dirname "$out")"
+            curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/git/blobs/$sha" | python3 -c 'import sys,json,base64; d=json.load(sys.stdin); sys.stdout.buffer.write(base64.b64decode(d["content"]))' > "$out"
+          }
+          fetch_blob cd16a7ee93ed985ac1c7d809651faac738b98387 'backend/app/api/auctions/[id]/deposit/route.ts'
+          fetch_blob 16a312eadeb63a20806769aee5a983ca214ebc38 'backend/app/api/escrow/webhook/route.ts'
+          fetch_blob 60f752d54aa171da8f0607cfa398ea1507576a24 'backend/lib/auction-deposit.ts'
+          fetch_blob cee8ecdc3fdcd9ebcd0adbe5cb64d252ea14cc6d 'backend/lib/escrow.ts'
+          fetch_blob 4d0a11736ac77df93b13859c54a548c77180a0f6 'backend/lib/transfer-workflow.ts'
+          fetch_blob 34877503678d6a9b028bf2342c28f74b325fce1e 'backend/prisma/migrations/20260813190000_financial_confirmation_boundaries/migration.sql'
+          fetch_blob 983327405a016fb040191c35e6a5d150ce03fa3b 'backend/prisma/migrations/20260813210000_provider_reference_binding/migration.sql'
+          fetch_blob 7e838640a655d83e9f22deecf8c4994779649a4a 'backend/tests/auction-deposit-recovery.test.ts'
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, re
+          s = Path('.github/workflows/markabat-wave1-assemble.yml').read_text()
+          m = re.search(r'^\s*ARCHIVE_B64:\s*(\S+)\s*$', s, re.M)
+          if not m:
+              raise SystemExit('ARCHIVE_B64 not found')
+          raw = base64.b64decode(m.group(1))
+          expected = '46eb592b753997f1e9d45c2e2a6fda02a2ee31e529e05279cdbdf4e4893e626e'
+          if hashlib.sha256(raw).hexdigest() != expected:
+              raise SystemExit('ARCHIVE_SHA256_MISMATCH')
+          Path('/tmp/wave1-schema-financial.tar.gz').write_bytes(raw)
+          PY
+          tar -xzf /tmp/wave1-schema-financial.tar.gz -C .
+          cd backend
+          rm -f package-lock.json
+          npm install -g npm@10.9.2 >/dev/null
+          test "$(npm --version)" = "10.9.2"
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          test -s package-lock.json
+          node -e "const x=require('./package-lock.json'); if(x.lockfileVersion!==3) process.exit(1)"
+          npm ci --ignore-scripts --no-audit --no-fund
+          cd ..
+          verify_blob() { local path="$1" sha="$2"; actual="$(git hash-object "$path")"; test "$actual" = "$sha" || { echo "BLOB_MISMATCH $path expected=$sha actual=$actual"; exit 1; }; }
+          verify_blob 'backend/app/api/auctions/[id]/deposit/route.ts' cd16a7ee93ed985ac1c7d809651faac738b98387
+          verify_blob 'backend/app/api/escrow/webhook/route.ts' 16a312eadeb63a20806769aee5a983ca214ebc38
+          verify_blob 'backend/lib/auction-deposit.ts' 60f752d54aa171da8f0607cfa398ea1507576a24
+          verify_blob 'backend/lib/escrow.ts' cee8ecdc3fdcd9ebcd0adbe5cb64d252ea14cc6d
+          verify_blob 'backend/lib/transfer-workflow.ts' 4d0a11736ac77df93b13859c54a548c77180a0f6
+          verify_blob 'backend/prisma/migrations/20260813190000_financial_confirmation_boundaries/migration.sql' 34877503678d6a9b028bf2342c28f74b325fce1e
+          verify_blob 'backend/prisma/migrations/20260813210000_provider_reference_binding/migration.sql' 983327405a016fb040191c35e6a5d150ce03fa3b
+          verify_blob 'backend/prisma/schema.prisma' 7af59bc9a91b267a3d793e653971b846b5490814
+          verify_blob 'backend/tests/auction-deposit-recovery.test.ts' 7e838640a655d83e9f22deecf8c4994779649a4a
+          verify_blob 'backend/tests/financial.test.ts' 7642fd4dc3586642305344625109846500fd5907
+          echo "LOCK_BLOB=$(git hash-object backend/package-lock.json)"
+          expected="$(printf '%s\n' 'backend/app/api/auctions/[id]/deposit/route.ts' 'backend/app/api/escrow/webhook/route.ts' 'backend/lib/auction-deposit.ts' 'backend/lib/escrow.ts' 'backend/lib/transfer-workflow.ts' 'backend/package-lock.json' 'backend/prisma/migrations/20260813190000_financial_confirmation_boundaries/migration.sql' 'backend/prisma/migrations/20260813210000_provider_reference_binding/migration.sql' 'backend/prisma/schema.prisma' 'backend/tests/auction-deposit-recovery.test.ts' 'backend/tests/financial.test.ts' | sort)"
+          actual="$(git diff --name-only "$BASE" -- backend | sort)"
+          test "$actual" = "$expected" || { echo FILE_SET_MISMATCH; printf 'EXPECTED:\n%s\nACTUAL:\n%s\n' "$expected" "$actual"; exit 1; }
+          git diff --check "$BASE" -- backend
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A backend
+          git commit -m 'fix: restore verified phase 2 wave 1 financial hardening [wave1-backend-assembled]'
+          git push origin HEAD:markabat-v4-phase2-wave1-fix
