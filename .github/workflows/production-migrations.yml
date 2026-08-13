@@ -65,13 +65,24 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Inspect known Neon migration baseline
+      - name: Inspect and allowlist Neon migration history
         id: baseline
         run: |
           set -euo pipefail
           BASELINE_STATE="$(node <<'NODE'
           const { PrismaClient } = require('@prisma/client');
           const db = new PrismaClient();
+
+          const LEGACY_BASELINE = '20260812034147_initial';
+          const CANONICAL_BASELINE = '20260812010041_init';
+          const GOVERNMENT_REFERENCE = '20260812090000_unique_government_reference';
+          const PASSWORD_RECOVERY = '20260812210000_password_reset_recovery_token';
+          const ALLOWED_MIGRATIONS = new Set([
+            LEGACY_BASELINE,
+            CANONICAL_BASELINE,
+            GOVERNMENT_REFERENCE,
+            PASSWORD_RECOVERY,
+          ]);
 
           (async () => {
             const migrations = await db.$queryRawUnsafe(`
@@ -86,9 +97,30 @@ jobs:
               process.exit(2);
             }
 
+            const counts = new Map();
+            for (const migration of migrations) {
+              counts.set(migration.migration_name, (counts.get(migration.migration_name) || 0) + 1);
+              if (!ALLOWED_MIGRATIONS.has(migration.migration_name)) {
+                console.error(`UNKNOWN_PRODUCTION_MIGRATION_NAME:${migration.migration_name}`);
+                process.exit(3);
+              }
+            }
+
+            for (const [name, count] of counts) {
+              if (count !== 1) {
+                console.error(`DUPLICATE_PRODUCTION_MIGRATION_NAME:${name}`);
+                process.exit(4);
+              }
+            }
+
             const names = new Set(migrations.map((m) => m.migration_name));
-            const legacy = names.has('20260812034147_initial');
-            const canonical = names.has('20260812010041_init');
+            const legacy = names.has(LEGACY_BASELINE);
+            const canonical = names.has(CANONICAL_BASELINE);
+
+            if (!legacy && !canonical) {
+              console.error('UNKNOWN_PRODUCTION_MIGRATION_BASELINE');
+              process.exit(5);
+            }
 
             const requiredTables = await db.$queryRawUnsafe(`
               SELECT table_name
@@ -98,17 +130,7 @@ jobs:
             `);
             if (requiredTables.length !== 5) {
               console.error('PRODUCTION_BASELINE_TABLES_MISSING');
-              process.exit(3);
-            }
-
-            if (canonical) {
-              console.log('CANONICAL_BASELINE_PRESENT');
-              return;
-            }
-
-            if (!legacy) {
-              console.error('UNKNOWN_PRODUCTION_MIGRATION_BASELINE');
-              process.exit(4);
+              process.exit(6);
             }
 
             const featureState = await db.$queryRawUnsafe(`
@@ -123,12 +145,38 @@ jobs:
                   WHERE table_schema='public'
                     AND table_name='PasswordResetRequest'
                     AND column_name='recoveryTokenHash'
-                ) AS recovery_token_column
+                    AND is_nullable='NO'
+                ) AS recovery_token_not_null,
+                EXISTS (
+                  SELECT 1 FROM pg_indexes
+                  WHERE schemaname='public'
+                    AND indexname='PasswordResetRequest_recoveryTokenHash_key'
+                ) AS recovery_token_unique
             `);
 
-            if (featureState[0]?.government_reference_unique || featureState[0]?.recovery_token_column) {
-              console.error('PRODUCTION_PENDING_MIGRATION_OBJECTS_ALREADY_PRESENT');
-              process.exit(5);
+            const state = featureState[0];
+            const governmentMigrationApplied = names.has(GOVERNMENT_REFERENCE);
+            const recoveryMigrationApplied = names.has(PASSWORD_RECOVERY);
+            const recoveryObjectsPresent = Boolean(state?.recovery_token_not_null && state?.recovery_token_unique);
+
+            if (Boolean(state?.government_reference_unique) !== governmentMigrationApplied) {
+              console.error('PRODUCTION_GOVERNMENT_MIGRATION_HISTORY_SCHEMA_MISMATCH');
+              process.exit(7);
+            }
+
+            if (recoveryObjectsPresent !== recoveryMigrationApplied) {
+              console.error('PRODUCTION_PASSWORD_RECOVERY_MIGRATION_HISTORY_SCHEMA_MISMATCH');
+              process.exit(8);
+            }
+
+            if (legacy && canonical) {
+              console.log('CANONICAL_BASELINE_WITH_KNOWN_LEGACY_ALIAS');
+              return;
+            }
+
+            if (canonical) {
+              console.log('CANONICAL_BASELINE_PRESENT');
+              return;
             }
 
             console.log('LEGACY_BASELINE_REQUIRES_CANONICAL_RESOLVE');
@@ -148,41 +196,152 @@ jobs:
         if: ${{ steps.baseline.outputs.state == 'LEGACY_BASELINE_REQUIRES_CANONICAL_RESOLVE' }}
         run: npx prisma migrate resolve --applied 20260812010041_init
 
-      - name: Show migration status before deploy
+      - name: Normalize the documented legacy migration alias
+        if: ${{ steps.baseline.outputs.state == 'LEGACY_BASELINE_REQUIRES_CANONICAL_RESOLVE' || steps.baseline.outputs.state == 'CANONICAL_BASELINE_WITH_KNOWN_LEGACY_ALIAS' }}
         run: |
-          set +e
-          npx prisma migrate status
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -ne 0 ]; then
-            echo "::notice::A legacy applied migration may remain in Neon history; committed migrations are verified explicitly after deploy."
-          fi
-
-      - name: Apply committed migrations only
-        run: npx prisma migrate deploy
-
-      - name: Verify committed migrations and required schema objects
-        run: |
+          set -euo pipefail
           node <<'NODE'
           const { PrismaClient } = require('@prisma/client');
           const db = new PrismaClient();
 
-          (async () => {
-            const requiredMigrations = [
-              '20260812010041_init',
-              '20260812090000_unique_government_reference',
-              '20260812210000_password_reset_recovery_token',
-            ];
+          const LEGACY_BASELINE = '20260812034147_initial';
+          const CANONICAL_BASELINE = '20260812010041_init';
+          const ALLOWED_MIGRATIONS = new Set([
+            LEGACY_BASELINE,
+            CANONICAL_BASELINE,
+            '20260812090000_unique_government_reference',
+            '20260812210000_password_reset_recovery_token',
+          ]);
 
+          (async () => {
+            await db.$transaction(async (tx) => {
+              const migrations = await tx.$queryRawUnsafe(`
+                SELECT migration_name, finished_at, rolled_back_at
+                FROM "_prisma_migrations"
+                FOR UPDATE
+              `);
+
+              for (const migration of migrations) {
+                if (!ALLOWED_MIGRATIONS.has(migration.migration_name)) {
+                  throw new Error(`UNKNOWN_PRODUCTION_MIGRATION_NAME:${migration.migration_name}`);
+                }
+                if (!migration.finished_at || migration.rolled_back_at) {
+                  throw new Error(`UNSAFE_PRODUCTION_MIGRATION_STATE:${migration.migration_name}`);
+                }
+              }
+
+              const canonicalRows = migrations.filter((m) => m.migration_name === CANONICAL_BASELINE);
+              const legacyRows = migrations.filter((m) => m.migration_name === LEGACY_BASELINE);
+
+              if (canonicalRows.length !== 1 || legacyRows.length !== 1) {
+                throw new Error(`LEGACY_ALIAS_NORMALIZATION_PRECONDITION_FAILED:canonical=${canonicalRows.length}:legacy=${legacyRows.length}`);
+              }
+
+              const deleted = await tx.$executeRawUnsafe(
+                `DELETE FROM "_prisma_migrations" WHERE migration_name = '${LEGACY_BASELINE}'`
+              );
+              if (deleted !== 1) {
+                throw new Error(`LEGACY_ALIAS_NORMALIZATION_DELETE_COUNT:${deleted}`);
+              }
+            });
+
+            console.log('Known legacy migration alias normalized to the canonical repository baseline.');
+          })()
+            .catch((error) => {
+              console.error(error instanceof Error ? error.message : String(error));
+              process.exit(1);
+            })
+            .finally(() => db.$disconnect());
+          NODE
+
+      - name: Verify normalized migration history before deploy
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { PrismaClient } = require('@prisma/client');
+          const db = new PrismaClient();
+
+          const LEGACY_BASELINE = '20260812034147_initial';
+          const REPOSITORY_MIGRATIONS = new Set([
+            '20260812010041_init',
+            '20260812090000_unique_government_reference',
+            '20260812210000_password_reset_recovery_token',
+          ]);
+
+          (async () => {
             const migrations = await db.$queryRawUnsafe(`
               SELECT migration_name, finished_at, rolled_back_at
               FROM "_prisma_migrations"
+              ORDER BY started_at
             `);
-            const applied = new Map(migrations.map((m) => [m.migration_name, m]));
+
+            const names = migrations.map((m) => m.migration_name);
+            if (names.includes(LEGACY_BASELINE)) {
+              throw new Error('LEGACY_MIGRATION_ALIAS_STILL_PRESENT_AFTER_NORMALIZATION');
+            }
+
+            for (const migration of migrations) {
+              if (!REPOSITORY_MIGRATIONS.has(migration.migration_name)) {
+                throw new Error(`UNKNOWN_PRODUCTION_MIGRATION_NAME:${migration.migration_name}`);
+              }
+              if (!migration.finished_at || migration.rolled_back_at) {
+                throw new Error(`UNSAFE_PRODUCTION_MIGRATION_STATE:${migration.migration_name}`);
+              }
+            }
+
+            const baseline = migrations.find((m) => m.migration_name === '20260812010041_init');
+            if (!baseline) {
+              throw new Error('CANONICAL_BASELINE_NOT_REGISTERED');
+            }
+
+            console.log('Production migration history is normalized and contains only repository-known migration names.');
+          })()
+            .catch((error) => {
+              console.error(error instanceof Error ? error.message : String(error));
+              process.exit(1);
+            })
+            .finally(() => db.$disconnect());
+          NODE
+
+      - name: Apply committed migrations only
+        run: npx prisma migrate deploy
+
+      - name: Verify exact committed migration history and required schema objects
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const { PrismaClient } = require('@prisma/client');
+          const db = new PrismaClient();
+
+          const requiredMigrations = [
+            '20260812010041_init',
+            '20260812090000_unique_government_reference',
+            '20260812210000_password_reset_recovery_token',
+          ];
+          const expected = new Set(requiredMigrations);
+
+          (async () => {
+            const migrations = await db.$queryRawUnsafe(`
+              SELECT migration_name, finished_at, rolled_back_at
+              FROM "_prisma_migrations"
+              ORDER BY started_at
+            `);
+
+            if (migrations.length !== requiredMigrations.length) {
+              throw new Error(`PRODUCTION_MIGRATION_COUNT_MISMATCH:${migrations.length}`);
+            }
+
+            for (const migration of migrations) {
+              if (!expected.has(migration.migration_name)) {
+                throw new Error(`UNKNOWN_PRODUCTION_MIGRATION_NAME:${migration.migration_name}`);
+              }
+              if (!migration.finished_at || migration.rolled_back_at) {
+                throw new Error(`REQUIRED_MIGRATION_NOT_CLEANLY_APPLIED:${migration.migration_name}`);
+              }
+            }
 
             for (const name of requiredMigrations) {
-              const row = applied.get(name);
-              if (!row || !row.finished_at || row.rolled_back_at) {
+              if (!migrations.some((m) => m.migration_name === name)) {
                 throw new Error(`REQUIRED_MIGRATION_NOT_APPLIED:${name}`);
               }
             }
@@ -213,7 +372,7 @@ jobs:
               throw new Error('PRODUCTION_SCHEMA_POST_MIGRATION_VERIFICATION_FAILED');
             }
 
-            console.log('Committed Prisma migrations and hardening schema objects verified.');
+            console.log('Exact committed Prisma migration history and hardening schema objects verified.');
           })()
             .catch((error) => {
               console.error(error instanceof Error ? error.message : String(error));
@@ -222,17 +381,11 @@ jobs:
             .finally(() => db.$disconnect());
           NODE
 
-      - name: Informational Prisma migration status
-        run: |
-          set +e
-          npx prisma migrate status
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -ne 0 ]; then
-            echo "::warning::Prisma reports the historical Neon migration name that is not present in the repository. This is tolerated only because all committed migrations and required schema objects were explicitly verified above."
-          fi
+      - name: Final Prisma migration status (strict)
+        run: npx prisma migrate status
 
       - name: Migration summary
         run: |
           echo "Production migration workflow completed successfully."
+          echo "Migration history matches the repository exactly."
           echo "No prisma migrate reset or prisma db push was executed."
