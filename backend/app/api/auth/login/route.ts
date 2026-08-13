@@ -12,8 +12,16 @@ export async function POST(req: Request) {
     const p = schema.safeParse(await req.json());
     if (!p.success) return Response.json({ ok: false, error: 'INVALID_INPUT' }, { status: 400 });
     const ip = getTrustedClientIp(req);
-    const u = await db.user.findUnique({ where: { phone: p.data.identifier } });
-    await consumeCompositeRateLimit({ scope: 'login', limit: 20, windowMs: 60_000, ip, userId: u?.id, deviceId: `target:${rateLimitTarget(p.data.identifier)}` });
+    const identifier = p.data.identifier.trim();
+    const u = await db.user.findFirst({
+      where: {
+        OR: [
+          { phone: identifier },
+          { email: { equals: identifier, mode: 'insensitive' } },
+        ],
+      },
+    });
+    await consumeCompositeRateLimit({ scope: 'login', limit: 20, windowMs: 60_000, ip, userId: u?.id, deviceId: `target:${rateLimitTarget(identifier)}` });
     if (!u || !(await verifyPassword(p.data.password, u.passwordHash))) return Response.json({ ok: false, error: 'INVALID_CREDENTIALS' }, { status: 401 });
     if (u.status !== 'ACTIVE') return Response.json({ ok: false, error: 'ACCOUNT_UNAVAILABLE' }, { status: 403 });
     const token = await signJwt({ sub: u.id, role: u.role, sessionVersion: u.sessionVersion });
