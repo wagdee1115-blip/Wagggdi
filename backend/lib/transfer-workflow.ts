@@ -62,6 +62,14 @@ export function isAllowedSaleTransition(current: SaleStatus, next: SaleStatus) {
   return current === next || Boolean(TRANSITIONS[current]?.includes(next));
 }
 
+const CUSTOMER_REQUESTABLE_STATUSES = new Set<SaleStatus>(['BUYER_ACCEPTED', 'CANCELLED', 'DISPUTED']);
+const OPERATIONS_ROLES = new Set(['OWNER', 'SUPER_ADMIN', 'ADMIN', 'FINANCE', 'VERIFIER']);
+
+/** Prevent customer-controlled PATCH requests from impersonating provider/escrow transitions. */
+export function canRequestSaleStatus(role: string, status: SaleStatus) {
+  return OPERATIONS_ROLES.has(role) || CUSTOMER_REQUESTABLE_STATUSES.has(status);
+}
+
 function ensureTransition(current: SaleStatus, next: SaleStatus) {
   if (current === next) return;
   if (!TRANSITIONS[current]?.includes(next)) throw new Error(`INVALID_SALE_TRANSITION:${current}->${next}`);
@@ -138,8 +146,9 @@ export async function createOwnershipTransfer(params: {
     const auctionFeeYER = new Prisma.Decimal(params.auctionFeeYer ?? 0);
     if (listingType !== 'AUCTION' && auctionFeeYER.gt(0)) throw new Error('AUCTION_FEE_REQUIRES_AUCTION');
     const transferFeeYER = new Prisma.Decimal(TRANSFER_FEE_USD).mul(exchange.usdToYer);
+    const platformFeeYER = new Prisma.Decimal(FEES.PLATFORM_USD).mul(exchange.usdToYer);
     const listingFeeYER = new Prisma.Decimal(listingCommissionUSD).mul(exchange.usdToYer);
-    const total = price.add(auctionFeeYER).add(transferFeeYER).add(listingFeeYER);
+    const total = price.add(auctionFeeYER).add(transferFeeYER).add(platformFeeYER).add(listingFeeYER);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + DIRECT_SALE_EXPIRATION_MS);
 
@@ -157,8 +166,8 @@ export async function createOwnershipTransfer(params: {
       buyerPhone: buyer.phone,
       buyerVerified: true,
       vehicleAmountYER: price,
-      platformFeeUSD: 0,
-      platformFeeYER: 0,
+      platformFeeUSD: FEES.PLATFORM_USD,
+      platformFeeYER,
       transferFeeUSD: TRANSFER_FEE_USD,
       transferFeeYER,
       listingCommissionUSD,
@@ -166,7 +175,7 @@ export async function createOwnershipTransfer(params: {
       governmentFeesYER: 0,
       totalPaidYER: total,
       sellerPayoutYER: price,
-      platformRevenueYER: listingFeeYER.add(auctionFeeYER).add(transferFeeYER),
+      platformRevenueYER: listingFeeYER.add(auctionFeeYER).add(transferFeeYER).add(platformFeeYER),
       exchangeRate: exchange.usdToYer,
       exchangeRateId: exchange.id,
       auctionId: params.auctionId,
@@ -234,6 +243,7 @@ export async function confirmSalePayment(saleId: string, providerReference: stri
     const nextHistory = [...history, { event: 'PAYMENT_CONFIRMED', at: now.toISOString(), providerReference }, { event: 'ESCROW_HELD', at: now.toISOString(), providerReference }];
 
     await createDoubleEntry({ transactionId: sale.id, entryGroupId: `PAYMENT:${sale.id}`, amount: sale.totalPaidYER, currency: 'YER', debitType: 'CUSTOMER_FUNDS', creditType: 'ESCROW_FUNDS', userId: sale.buyerId ?? undefined, relatedOperationId: sale.id, providerRef: providerReference, idempotencyKey: `PAYMENT:${idempotencyKey}` }, tx);
+    if (new Prisma.Decimal(sale.platformFeeYER).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:PLATFORM:${sale.id}`, amount: sale.platformFeeYER, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'PLATFORM_FEES', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:PLATFORM:${sale.id}` }, tx);
     if (new Prisma.Decimal(sale.transferFeeYER).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:TRANSFER:${sale.id}`, amount: sale.transferFeeYER, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'TRANSFER_FEES', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:TRANSFER:${sale.id}` }, tx);
     if (new Prisma.Decimal(sale.auctionFeeYER).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:AUCTION:${sale.id}`, amount: sale.auctionFeeYER, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'AUCTION_FEES', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:AUCTION:${sale.id}` }, tx);
     if (new Prisma.Decimal(sale.listingCommissionUSD).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:EXHIBITION:${sale.id}`, amount: new Prisma.Decimal(sale.listingCommissionUSD).mul(sale.exchangeRate), currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'LISTING_SALES_COMMISSION', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:EXHIBITION:${sale.id}` }, tx);
@@ -376,6 +386,10 @@ export async function advanceSaleStatus(saleId: string, requestedStatus: SaleSta
     ensureTransition(sale.status, nextStatus);
 
     if (nextStatus === 'BUYER_ACCEPTED' && sale.buyerId !== actorId && !['ADMIN', 'SUPER_ADMIN', 'OWNER'].includes(actor.role)) throw new Error('BUYER_APPROVAL_REQUIRED');
+    if (nextStatus === 'CANCELLED' && !OPERATIONS_ROLES.has(actor.role) && ![
+      'SALE_CREATED', 'BUYER_PENDING', 'BUYER_ACCEPTED', 'PAYMENT_PROCESSING', 'WAITING_BUYER_APPROVAL',
+      'BUYER_APPROVED', 'BUYER_OTP_VERIFIED', 'WAITING_PAYMENT',
+    ].includes(sale.status)) throw new Error('FUNDED_SALE_REQUIRES_DISPUTE');
     if (nextStatus === 'OWNERSHIP_TRANSFERRED') throw new Error('USE_GOVERNMENT_PROVIDER_TRANSFER');
     if (['PAYOUT_PENDING', 'PAYOUT_PROCESSING', 'PAYOUT_CONFIRMED'].includes(nextStatus)) {
       const payoutUserId = sale.payoutUserId ?? sale.sellerId;

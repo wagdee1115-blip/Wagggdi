@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/verify-css-output.mjs",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
@@ -44,6 +44,6 @@
   },
   "packageManager": "npm@10.9.2",
   "engines": {
-    "node": ">=20.0.0"
+    "node": "22.x"
   }
 }

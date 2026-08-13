@@ -7,7 +7,7 @@ import { confirmSalePayment } from '../lib/transfer-workflow';
 const requireDb = () => { if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED'); };
 
 describe('Financial integrity', () => {
-  it('is idempotent for a duplicate provider payment reference without a second ledger transaction', async () => {
+  it('posts the approved platform fee once and remains idempotent for duplicate payment delivery', async () => {
     requireDb();
     process.env.PAYMENT_PROVIDER_WEBHOOK_SECRET = 'test-only-provider-secret';
     const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -15,22 +15,43 @@ describe('Financial integrity', () => {
     const buyer = await db.user.create({ data: { fullName: 'LEDGER BUYER', phone: `770${suffix.slice(-7)}`, passwordHash: 'test', status: 'ACTIVE', phoneStatus: 'VERIFIED' } });
     const vehicle = await db.vehicle.create({ data: { ownerId: seller.id, plateNumber: `LP-${suffix.slice(-10)}`, vin: `LP${suffix}`.slice(0,17), make: 'TEST', model: 'TEST', year: 2026, price: 1000000, mileage: 0, transmission: 'AUTO', fuelType: 'PETROL', color: 'WHITE', city: 'Sanaa', status: 'ACTIVE' } });
     const rate = await db.exchangeRate.create({ data: { usdToYer: 535, source: 'MANUAL', isAutoUpdateEnabled: false, updatedBy: seller.id, updatedByName: seller.fullName } });
-    const sale = await db.vehicleSale.create({ data: { vehicleId: vehicle.id, sellerId: seller.id, sellerName: seller.fullName, sellerNationalId: '', sellerPhone: seller.phone, sellerVerified: true, payoutUserId: seller.id, buyerId: buyer.id, buyerName: buyer.fullName, buyerNationalId: '', buyerPhone: buyer.phone, buyerVerified: true, buyerApproved: true, buyerOtpVerified: true, vehicleAmountYER: 1000000, platformFeeUSD: 0, platformFeeYER: 0, transferFeeUSD: 80, transferFeeYER: 42800, listingCommissionUSD: 0, auctionFeeYER: 0, governmentFeesYER: 0, totalPaidYER: 1042800, sellerPayoutYER: 1000000, platformRevenueYER: 42800, exchangeRate: 535, exchangeRateId: rate.id, status: 'BUYER_ACCEPTED', expiresAt: new Date(Date.now()+2*60*60*1000) } });
+    const platformFeeYER = new Prisma.Decimal(20).mul(rate.usdToYer);
+    const transferFeeYER = new Prisma.Decimal(80).mul(rate.usdToYer);
+    const totalPaidYER = new Prisma.Decimal(1000000).add(platformFeeYER).add(transferFeeYER);
+    const sale = await db.vehicleSale.create({ data: { vehicleId: vehicle.id, sellerId: seller.id, sellerName: seller.fullName, sellerNationalId: '', sellerPhone: seller.phone, sellerVerified: true, payoutUserId: seller.id, buyerId: buyer.id, buyerName: buyer.fullName, buyerNationalId: '', buyerPhone: buyer.phone, buyerVerified: true, buyerApproved: true, buyerOtpVerified: true, vehicleAmountYER: 1000000, platformFeeUSD: 20, platformFeeYER, transferFeeUSD: 80, transferFeeYER, listingCommissionUSD: 0, auctionFeeYER: 0, governmentFeesYER: 0, totalPaidYER, sellerPayoutYER: 1000000, platformRevenueYER: platformFeeYER.add(transferFeeYER), exchangeRate: 535, exchangeRateId: rate.id, status: 'BUYER_ACCEPTED', expiresAt: new Date(Date.now()+2*60*60*1000) } });
     try {
-      const first = await confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}`, 1042800);
-      expect(first.status).toBe('ESCROW_HELD');
-      const replay = await confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}`, 1042800);
-      expect(replay.status).toBe('ESCROW_HELD');
-      await expect(confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-${suffix}`, 1)).rejects.toThrow('PAYMENT_AMOUNT_MISMATCH');
-      await expect(confirmSalePayment(sale.id, `PROVIDER-OTHER-${suffix}`, `IDEMP-${suffix}`, 1042800)).rejects.toThrow('PAYMENT_PROVIDER_REFERENCE_MISMATCH');
-      await expect(confirmSalePayment(sale.id, `PROVIDER-${suffix}`, `IDEMP-OTHER-${suffix}`, 1042800)).rejects.toThrow('IDEMPOTENCY_KEY_REUSED');
-      expect(await db.paymentTransaction.count({ where: { providerReference: `PROVIDER-${suffix}` } })).toBe(1);
-      expect(await db.financialLedger.count({ where: { transactionId: sale.id } })).toBe(4);
+      expect(platformFeeYER.toString()).toBe('10700');
+      expect(transferFeeYER.toString()).toBe('42800');
+      expect(totalPaidYER.toString()).toBe('1053500');
 
-      const second = await db.vehicleSale.create({ data: { vehicleId: vehicle.id, sellerId: seller.id, sellerName: seller.fullName, sellerNationalId: '', sellerPhone: seller.phone, sellerVerified: true, payoutUserId: seller.id, buyerId: buyer.id, buyerName: buyer.fullName, buyerNationalId: '', buyerPhone: buyer.phone, buyerVerified: true, buyerApproved: true, buyerOtpVerified: true, vehicleAmountYER: 1000000, platformFeeUSD: 0, platformFeeYER: 0, transferFeeUSD: 80, transferFeeYER: 42800, listingCommissionUSD: 0, auctionFeeYER: 0, governmentFeesYER: 0, totalPaidYER: 1042800, sellerPayoutYER: 1000000, platformRevenueYER: 42800, exchangeRate: 535, exchangeRateId: rate.id, status: 'BUYER_ACCEPTED', expiresAt: new Date(Date.now()+2*60*60*1000) } });
+      const providerReference = `PROVIDER-${suffix}`;
+      const idempotencyKey = `IDEMP-${suffix}`;
+      const first = await confirmSalePayment(sale.id, providerReference, idempotencyKey, totalPaidYER);
+      expect(first.status).toBe('ESCROW_HELD');
+
+      const platformGroup = `FEE:PLATFORM:${sale.id}`;
+      const platformEntries = await db.financialLedger.findMany({ where: { entryGroupId: platformGroup }, orderBy: { direction: 'asc' } });
+      expect(platformEntries).toHaveLength(2);
+      expect(platformEntries.every(entry => entry.amount.eq(platformFeeYER))).toBe(true);
+      expect(platformEntries.map(entry => entry.entryType).sort()).toEqual(['ESCROW_FUNDS', 'PLATFORM_FEES']);
+      expect(platformEntries.map(entry => entry.direction).sort()).toEqual(['CREDIT', 'DEBIT']);
+      expect((await assertLedgerBalanced(platformGroup)).balanced).toBe(true);
+
+      const replay = await confirmSalePayment(sale.id, providerReference, idempotencyKey, totalPaidYER);
+      expect(replay.status).toBe('ESCROW_HELD');
+      expect(await db.financialLedger.count({ where: { entryGroupId: platformGroup } })).toBe(2);
+
+      await expect(confirmSalePayment(sale.id, providerReference, idempotencyKey, 1)).rejects.toThrow('PAYMENT_AMOUNT_MISMATCH');
+      await expect(confirmSalePayment(sale.id, `PROVIDER-OTHER-${suffix}`, idempotencyKey, totalPaidYER)).rejects.toThrow('PAYMENT_PROVIDER_REFERENCE_MISMATCH');
+      await expect(confirmSalePayment(sale.id, providerReference, `IDEMP-OTHER-${suffix}`, totalPaidYER)).rejects.toThrow('IDEMPOTENCY_KEY_REUSED');
+      expect(await db.paymentTransaction.count({ where: { providerReference } })).toBe(1);
+      // PAYMENT + PLATFORM_FEE + TRANSFER_FEE, each represented by two balanced ledger legs.
+      expect(await db.financialLedger.count({ where: { transactionId: sale.id } })).toBe(6);
+
+      const second = await db.vehicleSale.create({ data: { vehicleId: vehicle.id, sellerId: seller.id, sellerName: seller.fullName, sellerNationalId: '', sellerPhone: seller.phone, sellerVerified: true, payoutUserId: seller.id, buyerId: buyer.id, buyerName: buyer.fullName, buyerNationalId: '', buyerPhone: buyer.phone, buyerVerified: true, buyerApproved: true, buyerOtpVerified: true, vehicleAmountYER: 1000000, platformFeeUSD: 20, platformFeeYER, transferFeeUSD: 80, transferFeeYER, listingCommissionUSD: 0, auctionFeeYER: 0, governmentFeesYER: 0, totalPaidYER, sellerPayoutYER: 1000000, platformRevenueYER: platformFeeYER.add(transferFeeYER), exchangeRate: 535, exchangeRateId: rate.id, status: 'BUYER_ACCEPTED', expiresAt: new Date(Date.now()+2*60*60*1000) } });
       try {
-        await expect(confirmSalePayment(second.id, `PROVIDER-${suffix}`, `IDEMP-CROSS-${suffix}`, 1042800)).rejects.toThrow('ALREADY_PROCESSED');
-        await expect(confirmSalePayment(second.id, `PROVIDER-CROSS-${suffix}`, `IDEMP-${suffix}`, 1042800)).rejects.toThrow('IDEMPOTENCY_KEY_REUSED');
+        await expect(confirmSalePayment(second.id, providerReference, `IDEMP-CROSS-${suffix}`, totalPaidYER)).rejects.toThrow('ALREADY_PROCESSED');
+        await expect(confirmSalePayment(second.id, `PROVIDER-CROSS-${suffix}`, idempotencyKey, totalPaidYER)).rejects.toThrow('IDEMPOTENCY_KEY_REUSED');
       } finally {
         await db.saleAuditLog.deleteMany({ where: { vehicleSaleId: second.id } });
         await db.vehicleSale.delete({ where: { id: second.id } });

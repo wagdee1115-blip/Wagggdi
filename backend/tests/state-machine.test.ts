@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedSaleTransition } from '../lib/transfer-workflow';
+import { canRequestSaleStatus, isAllowedSaleTransition } from '../lib/transfer-workflow';
 
 describe('Direct Sale canonical state machine', () => {
+  it('does not let customers impersonate payment, escrow, transfer, or payout providers', () => {
+    expect(canRequestSaleStatus('USER', 'BUYER_ACCEPTED')).toBe(true);
+    expect(canRequestSaleStatus('USER', 'CANCELLED')).toBe(true);
+    expect(canRequestSaleStatus('USER', 'PAYMENT_CONFIRMED')).toBe(false);
+    expect(canRequestSaleStatus('USER', 'ESCROW_HELD')).toBe(false);
+    expect(canRequestSaleStatus('USER', 'TRANSFER_IN_PROGRESS')).toBe(false);
+    expect(canRequestSaleStatus('USER', 'PAYOUT_CONFIRMED')).toBe(false);
+    expect(canRequestSaleStatus('FINANCE', 'PAYMENT_CONFIRMED')).toBe(true);
+  });
   it('allows the required forward path', () => {
     const path = [
       ['SALE_CREATED', 'BUYER_PENDING'],

@@ -4,23 +4,33 @@ on:
   workflow_dispatch:
   pull_request:
     branches:
-      - markabat-v4-payout-guard
+      - main
     paths:
       - "backend/**"
       - ".github/workflows/verify-v4.yml"
+      - ".github/workflows/production-migrations.yml"
   push:
     branches:
+      - markabat-v4-production-hardening
       - markabat-v4-verification
     paths:
       - "backend/**"
       - ".github/workflows/verify-v4.yml"
+      - ".github/workflows/production-migrations.yml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: verify-markabat-v4-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
+    name: Prisma, tests, security gates, and build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     services:
       postgres:
         image: postgres:16
@@ -38,13 +48,14 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/markabat_test
+      NODE_ENV: test
 
     defaults:
       run:
         working-directory: backend
 
     steps:
-      - name: Checkout workflow or pull request HEAD
+      - name: Checkout pull request HEAD
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -54,24 +65,31 @@ jobs:
         with:
           node-version: 22
 
-      - name: Verify backend files
+      - name: Verify required project files
         run: |
-          set -e
+          set -euo pipefail
           test -f package.json
           test -f prisma/schema.prisma
           test -f prisma/seed.ts
           test -f vercel.json
           test -f next.config.js
-          echo "Backend required files found."
+          test -f postcss.config.js
+          test -f tailwind.config.js
+          echo "Required MARKABAT files found."
 
       - name: Install dependencies
         run: |
-          set -e
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::warning::package-lock.json is missing; using npm install. Commit a generated lockfile when registry access permits."
+            npm install --no-audit --no-fund
+          fi
 
       - name: Check PostgreSQL
         run: |
-          set -e
+          set -euo pipefail
           node -e "const net=require('net');const s=net.createConnection({host:'127.0.0.1',port:5432});s.on('connect',()=>{console.log('PostgreSQL port is reachable.');s.end();process.exit(0)});s.on('error',e=>{console.error(e.message);process.exit(1)})"
 
       - name: Prisma validate
@@ -82,24 +100,24 @@ jobs:
 
       - name: Require migration history
         run: |
-          set -e
+          set -euo pipefail
           test -d prisma/migrations
           test -n "$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d -print -quit)"
           echo "Prisma migration history found."
 
-      - name: Prisma migrate deploy
+      - name: Prisma migrate deploy on ephemeral CI database
         run: npx prisma migrate deploy
 
       - name: Prisma migrate status
         run: npx prisma migrate status
 
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
-      - name: Run unit and integration tests
+      - name: Run complete test suite
         run: npm test
 
-      - name: Financial tests
+      - name: Financial integrity tests
         run: npx vitest run tests/financial.test.ts
 
       - name: Sale concurrency tests
@@ -114,29 +132,27 @@ jobs:
       - name: State machine tests
         run: npx vitest run tests/state-machine.test.ts
 
-      - name: Core tests
+      - name: Core fee and registration tests
         run: npx vitest run tests/core.test.ts
 
       - name: E2E verification gates
         run: npx vitest run tests/e2e.test.ts
 
-      - name: Production build
+      - name: Production build and CSS gate
         run: npm run build
 
       - name: Final verification summary
         run: |
-          set -e
+          set -euo pipefail
           echo "========================================"
           echo " MARKABAT V4 VERIFICATION PIPELINE "
           echo "========================================"
-          echo "Files: PASS"
+          echo "Required files: PASS"
           echo "Dependencies: PASS"
-          echo "PostgreSQL: PASS"
-          echo "Prisma validate: PASS"
-          echo "Prisma generate: PASS"
-          echo "Migration deploy: PASS"
-          echo "Migration status: PASS"
+          echo "Ephemeral PostgreSQL: PASS"
+          echo "Prisma validate/generate: PASS"
+          echo "Migration deploy/status: PASS"
           echo "TypeScript: PASS"
           echo "Tests: PASS"
-          echo "Build: PASS"
+          echo "Next.js + Tailwind CSS build gate: PASS"
           echo "========================================"

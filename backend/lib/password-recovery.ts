@@ -45,10 +45,13 @@ export async function verifyPasswordResetOtp(params: { recoveryToken: string; ot
 }
 
 export async function completePasswordReset(params: { resetRequestId: string; userId: string; password: string }) {
-  const request = await db.passwordResetRequest.findUnique({ where: { id: params.resetRequestId } });
-  if (!request || request.userId !== params.userId || !request.verifiedAt || request.completedAt || request.expiresAt <= new Date()) throw new Error('RESET_REQUEST_INVALID');
   const passwordHash = await hashPassword(params.password);
   return db.$transaction(async tx => {
+    // Serialize reset-token consumption so concurrent requests cannot both
+    // pass the completedAt check and apply two password changes.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`PASSWORD_RESET:${params.resetRequestId}`}))`;
+    const request = await tx.passwordResetRequest.findUnique({ where: { id: params.resetRequestId } });
+    if (!request || request.userId !== params.userId || !request.verifiedAt || request.completedAt || request.expiresAt <= new Date()) throw new Error('RESET_REQUEST_INVALID');
     const user = await tx.user.update({ where: { id: params.userId }, data: { passwordHash, sessionVersion: { increment: 1 } } });
     await tx.passwordResetRequest.update({ where: { id: request.id }, data: { completedAt: new Date() } });
     await tx.auditLog.create({ data: { userId: user.id, action: 'PASSWORD_RESET_COMPLETED', entityType: 'USER', entityId: user.id, metadata: { sessionVersionInvalidated: true } } });

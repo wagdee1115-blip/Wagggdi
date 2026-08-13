@@ -1,6 +1,6 @@
 import { getCurrentUser, apiError } from '@/lib/api-auth';
 import { db } from '@/lib/db';
-import { advanceSaleStatus } from '@/lib/transfer-workflow';
+import { advanceSaleStatus, canRequestSaleStatus } from '@/lib/transfer-workflow';
 import { SaleStatus } from '@prisma/client';
 
 const ALLOWED = new Set<SaleStatus>([
@@ -28,6 +28,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const body = await req.json();
     const requested = String(body.status) as SaleStatus;
     if (!ALLOWED.has(requested)) return Response.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 });
+    if (!canRequestSaleStatus(u.role, requested)) return Response.json({ ok: false, error: 'PROVIDER_MANAGED_STATUS' }, { status: 403 });
     const sale = await db.vehicleSale.findUnique({ where: { id: params.id } });
     if (!sale) return Response.json({ ok: false, error: 'SALE_NOT_FOUND' }, { status: 404 });
     if (sale.sellerId !== u.id && sale.payoutUserId !== u.id && sale.buyerId !== u.id && !['ADMIN', 'SUPER_ADMIN', 'OWNER', 'FINANCE', 'VERIFIER'].includes(u.role)) return Response.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 });

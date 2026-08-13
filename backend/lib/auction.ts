@@ -120,7 +120,8 @@ export async function finalizeAuction(auctionId: string) {
     const bidDepositYER = winningDeposit?.amount ?? new Prisma.Decimal(0);
     const auctionFeeYER = new Prisma.Decimal(calculateAuctionFeeYer(Number(salePrice)));
     const transferFeeYER = new Prisma.Decimal(FEES.TRANSFER_USD).mul(exchange.usdToYer);
-    const grossTotal = salePrice.add(auctionFeeYER).add(transferFeeYER);
+    const platformFeeYER = new Prisma.Decimal(FEES.PLATFORM_USD).mul(exchange.usdToYer);
+    const grossTotal = salePrice.add(auctionFeeYER).add(transferFeeYER).add(platformFeeYER);
     const total = grossTotal.sub(bidDepositYER);
     if (total.lt(0)) throw new Error('BID_DEPOSIT_EXCEEDS_TOTAL');
     const sale = await tx.vehicleSale.create({
@@ -138,8 +139,8 @@ export async function finalizeAuction(auctionId: string) {
         buyerNationalId: buyer.nationalId ?? '',
         buyerPhone: buyer.phone,
         vehicleAmountYER: salePrice,
-        platformFeeUSD: 0,
-        platformFeeYER: 0,
+        platformFeeUSD: FEES.PLATFORM_USD,
+        platformFeeYER,
         transferFeeUSD: FEES.TRANSFER_USD,
         transferFeeYER,
         listingCommissionUSD: 0,
@@ -148,7 +149,7 @@ export async function finalizeAuction(auctionId: string) {
         bidDepositYER,
         totalPaidYER: total,
         sellerPayoutYER: salePrice,
-        platformRevenueYER: auctionFeeYER.add(transferFeeYER),
+        platformRevenueYER: auctionFeeYER.add(transferFeeYER).add(platformFeeYER),
         exchangeRate: exchange.usdToYer,
         exchangeRateId: exchange.id,
         status: 'WAITING_PAYMENT',
