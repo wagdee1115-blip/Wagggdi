@@ -13,6 +13,52 @@ const schema = z.object({
   soldThroughExhibitionService: z.boolean().default(false),
 });
 
+export async function GET() {
+  try {
+    const u = await getCurrentUser();
+    if (!u) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+    const sales = await db.vehicleSale.findMany({
+      where: {
+        OR: [
+          { sellerId: u.id },
+          { buyerId: u.id },
+          { payoutUserId: u.id },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        status: true,
+        sellerId: true,
+        sellerName: true,
+        sellerPhone: true,
+        buyerId: true,
+        buyerName: true,
+        buyerPhone: true,
+        vehicleAmountYER: true,
+        platformFeeUSD: true,
+        platformFeeYER: true,
+        transferFeeUSD: true,
+        transferFeeYER: true,
+        totalPaidYER: true,
+        exchangeRate: true,
+        buyerOtpVerified: true,
+        sellerOtpVerified: true,
+        expiresAt: true,
+        createdAt: true,
+        vehicle: {
+          select: { id: true, plateNumber: true, make: true, model: true, year: true, city: true },
+        },
+      },
+    });
+    return Response.json({ ok: true, userId: u.id, sales });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'TRANSFER_LIST_FAILED';
+    return Response.json({ ok: false, error: msg }, { status: 500 });
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const u = await getCurrentUser();
