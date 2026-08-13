@@ -136,37 +136,133 @@ jobs:
             const featureState = await db.$queryRawUnsafe(`
               SELECT
                 EXISTS (
-                  SELECT 1 FROM pg_indexes
-                  WHERE schemaname='public'
-                    AND indexname='VehicleSale_governmentReference_key'
-                ) AS government_reference_unique,
+                  SELECT 1
+                  FROM information_schema.columns
+                  WHERE table_schema='public'
+                    AND table_name='VehicleSale'
+                    AND column_name='governmentReference'
+                ) AS government_reference_column_exists,
                 EXISTS (
-                  SELECT 1 FROM information_schema.columns
+                  SELECT 1
+                  FROM pg_class object
+                  JOIN pg_namespace ns ON ns.oid = object.relnamespace
+                  WHERE ns.nspname='public'
+                    AND object.relname='VehicleSale_governmentReference_key'
+                ) AS government_reference_index_name_exists,
+                EXISTS (
+                  SELECT 1
+                  FROM pg_index i
+                  JOIN pg_class idx ON idx.oid = i.indexrelid
+                  JOIN pg_class tbl ON tbl.oid = i.indrelid
+                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+                  WHERE ns.nspname='public'
+                    AND idx.relname='VehicleSale_governmentReference_key'
+                    AND tbl.relname='VehicleSale'
+                    AND i.indisunique
+                    AND i.indisvalid
+                    AND i.indisready
+                    AND i.indpred IS NULL
+                    AND i.indexprs IS NULL
+                    AND i.indnkeyatts=1
+                    AND i.indnatts=1
+                    AND EXISTS (
+                      SELECT 1
+                      FROM pg_attribute a
+                      WHERE a.attrelid=tbl.oid
+                        AND a.attname='governmentReference'
+                        AND a.attnum = ANY(i.indkey)
+                        AND NOT a.attisdropped
+                    )
+                ) AS government_reference_unique_exact,
+                EXISTS (
+                  SELECT 1
+                  FROM information_schema.columns
+                  WHERE table_schema='public'
+                    AND table_name='PasswordResetRequest'
+                    AND column_name='recoveryTokenHash'
+                ) AS recovery_token_column_exists,
+                EXISTS (
+                  SELECT 1
+                  FROM information_schema.columns
+                  WHERE table_schema='public'
+                    AND table_name='PasswordResetRequest'
+                    AND column_name='recoveryTokenHash'
+                    AND data_type='text'
+                ) AS recovery_token_text,
+                EXISTS (
+                  SELECT 1
+                  FROM information_schema.columns
                   WHERE table_schema='public'
                     AND table_name='PasswordResetRequest'
                     AND column_name='recoveryTokenHash'
                     AND is_nullable='NO'
                 ) AS recovery_token_not_null,
                 EXISTS (
-                  SELECT 1 FROM pg_indexes
-                  WHERE schemaname='public'
-                    AND indexname='PasswordResetRequest_recoveryTokenHash_key'
-                ) AS recovery_token_unique
+                  SELECT 1
+                  FROM pg_class object
+                  JOIN pg_namespace ns ON ns.oid = object.relnamespace
+                  WHERE ns.nspname='public'
+                    AND object.relname='PasswordResetRequest_recoveryTokenHash_key'
+                ) AS recovery_token_index_name_exists,
+                EXISTS (
+                  SELECT 1
+                  FROM pg_index i
+                  JOIN pg_class idx ON idx.oid = i.indexrelid
+                  JOIN pg_class tbl ON tbl.oid = i.indrelid
+                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+                  WHERE ns.nspname='public'
+                    AND idx.relname='PasswordResetRequest_recoveryTokenHash_key'
+                    AND tbl.relname='PasswordResetRequest'
+                    AND i.indisunique
+                    AND i.indisvalid
+                    AND i.indisready
+                    AND i.indpred IS NULL
+                    AND i.indexprs IS NULL
+                    AND i.indnkeyatts=1
+                    AND i.indnatts=1
+                    AND EXISTS (
+                      SELECT 1
+                      FROM pg_attribute a
+                      WHERE a.attrelid=tbl.oid
+                        AND a.attname='recoveryTokenHash'
+                        AND a.attnum = ANY(i.indkey)
+                        AND NOT a.attisdropped
+                    )
+                ) AS recovery_token_unique_exact
             `);
 
             const state = featureState[0];
             const governmentMigrationApplied = names.has(GOVERNMENT_REFERENCE);
             const recoveryMigrationApplied = names.has(PASSWORD_RECOVERY);
-            const recoveryObjectsPresent = Boolean(state?.recovery_token_not_null && state?.recovery_token_unique);
 
-            if (Boolean(state?.government_reference_unique) !== governmentMigrationApplied) {
-              console.error('PRODUCTION_GOVERNMENT_MIGRATION_HISTORY_SCHEMA_MISMATCH');
+            if (!state?.government_reference_column_exists) {
+              console.error('PRODUCTION_GOVERNMENT_REFERENCE_COLUMN_MISSING');
               process.exit(7);
             }
 
-            if (recoveryObjectsPresent !== recoveryMigrationApplied) {
-              console.error('PRODUCTION_PASSWORD_RECOVERY_MIGRATION_HISTORY_SCHEMA_MISMATCH');
-              process.exit(8);
+            if (governmentMigrationApplied) {
+              if (!state?.government_reference_unique_exact) {
+                console.error('PRODUCTION_GOVERNMENT_MIGRATION_HISTORY_SCHEMA_MISMATCH');
+                process.exit(8);
+              }
+            } else if (state?.government_reference_index_name_exists) {
+              console.error('PRODUCTION_GOVERNMENT_INDEX_PARTIAL_OR_CONFLICTING');
+              process.exit(9);
+            }
+
+            if (recoveryMigrationApplied) {
+              if (
+                !state?.recovery_token_column_exists ||
+                !state?.recovery_token_text ||
+                !state?.recovery_token_not_null ||
+                !state?.recovery_token_unique_exact
+              ) {
+                console.error('PRODUCTION_PASSWORD_RECOVERY_MIGRATION_HISTORY_SCHEMA_MISMATCH');
+                process.exit(10);
+              }
+            } else if (state?.recovery_token_column_exists || state?.recovery_token_index_name_exists) {
+              console.error('PRODUCTION_PASSWORD_RECOVERY_PARTIAL_SCHEMA_PRESENT');
+              process.exit(11);
             }
 
             if (legacy && canonical) {
@@ -183,7 +279,7 @@ jobs:
           })()
             .catch((error) => {
               console.error(error instanceof Error ? error.message : String(error));
-              process.exit(10);
+              process.exit(20);
             })
             .finally(() => db.$disconnect());
           NODE
@@ -306,7 +402,7 @@ jobs:
       - name: Apply committed migrations only
         run: npx prisma migrate deploy
 
-      - name: Verify exact committed migration history and required schema objects
+      - name: Verify exact committed migration history and schema invariants
         run: |
           set -euo pipefail
           node <<'NODE'
@@ -349,30 +445,84 @@ jobs:
             const checks = await db.$queryRawUnsafe(`
               SELECT
                 EXISTS (
-                  SELECT 1 FROM pg_indexes
-                  WHERE schemaname='public'
-                    AND indexname='VehicleSale_governmentReference_key'
-                ) AS government_reference_unique,
+                  SELECT 1
+                  FROM information_schema.columns
+                  WHERE table_schema='public'
+                    AND table_name='VehicleSale'
+                    AND column_name='governmentReference'
+                ) AS government_reference_column_exists,
                 EXISTS (
-                  SELECT 1 FROM information_schema.columns
+                  SELECT 1
+                  FROM pg_index i
+                  JOIN pg_class idx ON idx.oid = i.indexrelid
+                  JOIN pg_class tbl ON tbl.oid = i.indrelid
+                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+                  WHERE ns.nspname='public'
+                    AND idx.relname='VehicleSale_governmentReference_key'
+                    AND tbl.relname='VehicleSale'
+                    AND i.indisunique
+                    AND i.indisvalid
+                    AND i.indisready
+                    AND i.indpred IS NULL
+                    AND i.indexprs IS NULL
+                    AND i.indnkeyatts=1
+                    AND i.indnatts=1
+                    AND EXISTS (
+                      SELECT 1
+                      FROM pg_attribute a
+                      WHERE a.attrelid=tbl.oid
+                        AND a.attname='governmentReference'
+                        AND a.attnum = ANY(i.indkey)
+                        AND NOT a.attisdropped
+                    )
+                ) AS government_reference_unique_exact,
+                EXISTS (
+                  SELECT 1
+                  FROM information_schema.columns
                   WHERE table_schema='public'
                     AND table_name='PasswordResetRequest'
                     AND column_name='recoveryTokenHash'
+                    AND data_type='text'
                     AND is_nullable='NO'
-                ) AS recovery_token_not_null,
+                ) AS recovery_token_text_not_null,
                 EXISTS (
-                  SELECT 1 FROM pg_indexes
-                  WHERE schemaname='public'
-                    AND indexname='PasswordResetRequest_recoveryTokenHash_key'
-                ) AS recovery_token_unique
+                  SELECT 1
+                  FROM pg_index i
+                  JOIN pg_class idx ON idx.oid = i.indexrelid
+                  JOIN pg_class tbl ON tbl.oid = i.indrelid
+                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace
+                  WHERE ns.nspname='public'
+                    AND idx.relname='PasswordResetRequest_recoveryTokenHash_key'
+                    AND tbl.relname='PasswordResetRequest'
+                    AND i.indisunique
+                    AND i.indisvalid
+                    AND i.indisready
+                    AND i.indpred IS NULL
+                    AND i.indexprs IS NULL
+                    AND i.indnkeyatts=1
+                    AND i.indnatts=1
+                    AND EXISTS (
+                      SELECT 1
+                      FROM pg_attribute a
+                      WHERE a.attrelid=tbl.oid
+                        AND a.attname='recoveryTokenHash'
+                        AND a.attnum = ANY(i.indkey)
+                        AND NOT a.attisdropped
+                    )
+                ) AS recovery_token_unique_exact
             `);
 
             const state = checks[0];
-            if (!state?.government_reference_unique || !state?.recovery_token_not_null || !state?.recovery_token_unique) {
+            if (
+              !state?.government_reference_column_exists ||
+              !state?.government_reference_unique_exact ||
+              !state?.recovery_token_text_not_null ||
+              !state?.recovery_token_unique_exact
+            ) {
               throw new Error('PRODUCTION_SCHEMA_POST_MIGRATION_VERIFICATION_FAILED');
             }
 
-            console.log('Exact committed Prisma migration history and hardening schema objects verified.');
+            console.log('Exact committed Prisma migration history and schema invariants verified.');
           })()
             .catch((error) => {
               console.error(error instanceof Error ? error.message : String(error));
@@ -388,4 +538,5 @@ jobs:
         run: |
           echo "Production migration workflow completed successfully."
           echo "Migration history matches the repository exactly."
+          echo "Required unique indexes target the expected table and column with valid non-partial uniqueness."
           echo "No prisma migrate reset or prisma db push was executed."
