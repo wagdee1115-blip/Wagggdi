@@ -65,14 +65,172 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Inspect known Neon migration baseline
+        id: baseline
+        run: |
+          set -euo pipefail
+          BASELINE_STATE="$(node <<'NODE'
+          const { PrismaClient } = require('@prisma/client');
+          const db = new PrismaClient();
+
+          (async () => {
+            const migrations = await db.$queryRawUnsafe(`
+              SELECT migration_name, finished_at, rolled_back_at
+              FROM "_prisma_migrations"
+              ORDER BY started_at
+            `);
+
+            const failed = migrations.filter((m) => !m.finished_at || m.rolled_back_at);
+            if (failed.length) {
+              console.error('FAILED_OR_ROLLED_BACK_MIGRATION_PRESENT');
+              process.exit(2);
+            }
+
+            const names = new Set(migrations.map((m) => m.migration_name));
+            const legacy = names.has('20260812034147_initial');
+            const canonical = names.has('20260812010041_init');
+
+            const requiredTables = await db.$queryRawUnsafe(`
+              SELECT table_name
+              FROM information_schema.tables
+              WHERE table_schema = 'public'
+                AND table_name IN ('User','Vehicle','VehicleSale','PasswordResetRequest','FinancialLedger')
+            `);
+            if (requiredTables.length !== 5) {
+              console.error('PRODUCTION_BASELINE_TABLES_MISSING');
+              process.exit(3);
+            }
+
+            if (canonical) {
+              console.log('CANONICAL_BASELINE_PRESENT');
+              return;
+            }
+
+            if (!legacy) {
+              console.error('UNKNOWN_PRODUCTION_MIGRATION_BASELINE');
+              process.exit(4);
+            }
+
+            const featureState = await db.$queryRawUnsafe(`
+              SELECT
+                EXISTS (
+                  SELECT 1 FROM pg_indexes
+                  WHERE schemaname='public'
+                    AND indexname='VehicleSale_governmentReference_key'
+                ) AS government_reference_unique,
+                EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='public'
+                    AND table_name='PasswordResetRequest'
+                    AND column_name='recoveryTokenHash'
+                ) AS recovery_token_column
+            `);
+
+            if (featureState[0]?.government_reference_unique || featureState[0]?.recovery_token_column) {
+              console.error('PRODUCTION_PENDING_MIGRATION_OBJECTS_ALREADY_PRESENT');
+              process.exit(5);
+            }
+
+            console.log('LEGACY_BASELINE_REQUIRES_CANONICAL_RESOLVE');
+          })()
+            .catch((error) => {
+              console.error(error instanceof Error ? error.message : String(error));
+              process.exit(10);
+            })
+            .finally(() => db.$disconnect());
+          NODE
+          )"
+
+          echo "Migration baseline preflight: ${BASELINE_STATE}"
+          echo "state=${BASELINE_STATE}" >> "$GITHUB_OUTPUT"
+
+      - name: Register canonical baseline without changing schema
+        if: ${{ steps.baseline.outputs.state == 'LEGACY_BASELINE_REQUIRES_CANONICAL_RESOLVE' }}
+        run: npx prisma migrate resolve --applied 20260812010041_init
+
       - name: Show migration status before deploy
-        run: npx prisma migrate status || true
+        run: |
+          set +e
+          npx prisma migrate status
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::notice::A legacy applied migration may remain in Neon history; committed migrations are verified explicitly after deploy."
+          fi
 
       - name: Apply committed migrations only
         run: npx prisma migrate deploy
 
-      - name: Verify migration status after deploy
-        run: npx prisma migrate status
+      - name: Verify committed migrations and required schema objects
+        run: |
+          node <<'NODE'
+          const { PrismaClient } = require('@prisma/client');
+          const db = new PrismaClient();
+
+          (async () => {
+            const requiredMigrations = [
+              '20260812010041_init',
+              '20260812090000_unique_government_reference',
+              '20260812210000_password_reset_recovery_token',
+            ];
+
+            const migrations = await db.$queryRawUnsafe(`
+              SELECT migration_name, finished_at, rolled_back_at
+              FROM "_prisma_migrations"
+            `);
+            const applied = new Map(migrations.map((m) => [m.migration_name, m]));
+
+            for (const name of requiredMigrations) {
+              const row = applied.get(name);
+              if (!row || !row.finished_at || row.rolled_back_at) {
+                throw new Error(`REQUIRED_MIGRATION_NOT_APPLIED:${name}`);
+              }
+            }
+
+            const checks = await db.$queryRawUnsafe(`
+              SELECT
+                EXISTS (
+                  SELECT 1 FROM pg_indexes
+                  WHERE schemaname='public'
+                    AND indexname='VehicleSale_governmentReference_key'
+                ) AS government_reference_unique,
+                EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema='public'
+                    AND table_name='PasswordResetRequest'
+                    AND column_name='recoveryTokenHash'
+                    AND is_nullable='NO'
+                ) AS recovery_token_not_null,
+                EXISTS (
+                  SELECT 1 FROM pg_indexes
+                  WHERE schemaname='public'
+                    AND indexname='PasswordResetRequest_recoveryTokenHash_key'
+                ) AS recovery_token_unique
+            `);
+
+            const state = checks[0];
+            if (!state?.government_reference_unique || !state?.recovery_token_not_null || !state?.recovery_token_unique) {
+              throw new Error('PRODUCTION_SCHEMA_POST_MIGRATION_VERIFICATION_FAILED');
+            }
+
+            console.log('Committed Prisma migrations and hardening schema objects verified.');
+          })()
+            .catch((error) => {
+              console.error(error instanceof Error ? error.message : String(error));
+              process.exit(1);
+            })
+            .finally(() => db.$disconnect());
+          NODE
+
+      - name: Informational Prisma migration status
+        run: |
+          set +e
+          npx prisma migrate status
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::warning::Prisma reports the historical Neon migration name that is not present in the repository. This is tolerated only because all committed migrations and required schema objects were explicitly verified above."
+          fi
 
       - name: Migration summary
         run: |
