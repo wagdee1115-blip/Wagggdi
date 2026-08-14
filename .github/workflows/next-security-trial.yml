@@ -61,9 +61,6 @@ jobs:
                   n=n.replace('cookies().', '(await cookies()).')
                   cookie_touched.append(str(p))
 
-              # Next 16 route-handler context params are promises.
-              # Keep this runner-only trial mechanical: change the existing
-              # destructured context type and await each property access.
               if 'app' in p.parts and 'api' in p.parts and p.name == 'route.ts':
                   n2, count = re.subn(
                       r'\{\s*params\s*\}\s*:\s*\{\s*params\s*:\s*\{([^{}]+)\}\s*\}',
@@ -99,5 +96,29 @@ jobs:
         run: npm run typecheck
       - name: Full tests
         run: npm test
-      - name: Build
-        run: npm run build
+      - name: Next 16 production build and CSS gate
+        run: |
+          npx next build
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = path.resolve('.next/static');
+          const files = [];
+          function walk(dir) {
+            for (const e of fs.readdirSync(dir, {withFileTypes:true})) {
+              const p = path.join(dir, e.name);
+              if (e.isDirectory()) walk(p);
+              else if (e.name.endsWith('.css')) files.push(p);
+            }
+          }
+          if (!fs.existsSync(root)) throw new Error(`CSS_BUILD_GATE_FAILED: missing ${root}`);
+          walk(root);
+          if (!files.length) throw new Error('CSS_BUILD_GATE_FAILED: no compiled CSS files were emitted by Next.js');
+          let bytes = 0, css = '';
+          for (const file of files) { bytes += fs.statSync(file).size; css += '\n' + fs.readFileSync(file,'utf8'); }
+          if (bytes < 2000) throw new Error(`CSS_BUILD_GATE_FAILED: compiled CSS is unexpectedly small (${bytes} bytes)`);
+          const required = ['.min-h-screen','.grid-cols-2','.rounded-3xl','.bg-slate-50','.text-primary-900'];
+          const missing = required.filter(x => !css.includes(x));
+          if (missing.length) throw new Error(`CSS_BUILD_GATE_FAILED: Tailwind utilities missing: ${missing.join(', ')}`);
+          console.log(`CSS_BUILD_GATE_PASS: ${files.length} CSS file(s), ${bytes} bytes, Tailwind utilities verified.`);
+          NODE
