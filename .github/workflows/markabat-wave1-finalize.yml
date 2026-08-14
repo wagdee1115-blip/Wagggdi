@@ -77,7 +77,7 @@ jobs:
           verify_blob 'backend/tests/financial.test.ts' 7642fd4dc3586642305344625109846500fd5907
           echo "LOCK_BLOB=$(git hash-object backend/package-lock.json)"
           expected="$(printf '%s\n' 'backend/app/api/auctions/[id]/deposit/route.ts' 'backend/app/api/escrow/webhook/route.ts' 'backend/lib/auction-deposit.ts' 'backend/lib/escrow.ts' 'backend/lib/transfer-workflow.ts' 'backend/package-lock.json' 'backend/prisma/migrations/20260813190000_financial_confirmation_boundaries/migration.sql' 'backend/prisma/migrations/20260813210000_provider_reference_binding/migration.sql' 'backend/prisma/schema.prisma' 'backend/tests/auction-deposit-recovery.test.ts' 'backend/tests/financial.test.ts' | sort)"
-          actual="$(git diff --name-only "$BASE" -- backend | sort)"
+          actual="$({ git diff --name-only "$BASE" -- backend; git ls-files --others --exclude-standard -- backend; } | sort -u)"
           test "$actual" = "$expected" || { echo FILE_SET_MISMATCH; printf 'EXPECTED:\n%s\nACTUAL:\n%s\n' "$expected" "$actual"; exit 1; }
           git diff --check "$BASE" -- backend
           git config user.name 'github-actions[bot]'
