@@ -415,6 +415,8 @@ model PaymentTransaction {
   user User @relation(fields: [userId], references: [id])
   ownershipTransferId String?
   ownershipTransfer OwnershipTransferRequest? @relation(fields: [ownershipTransferId], references: [id])
+  vehicleSaleId String? @unique
+  vehicleSale VehicleSale? @relation(fields: [vehicleSaleId], references: [id])
   amount Decimal
   currency String @default("YER")
   provider String
@@ -528,6 +530,7 @@ model AuctionBidDeposit {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([auctionId, bidderId])
   @@index([auctionId, bidderId, status])
 }
 
@@ -746,6 +749,7 @@ model VehicleSale {
   expiresAt DateTime
   
   payments SalePayment[]
+  paymentTransaction PaymentTransaction?
   auditLogs SaleAuditLog[]
   contract SaleContract?
   receipts PaymentReceipt[]
@@ -929,14 +933,15 @@ model EscrowTransaction {
   exchangeRate Decimal
   
   status String @default("HELD")
-  paymentProviderReference String?
+  paymentProviderReference String? @unique
+  escrowProviderReference String? @unique
   
   createdAt DateTime @default(now())
   securedAt DateTime?
   releaseReadyAt DateTime?
   updatedAt DateTime @updatedAt
   
-  @@index([vehicleSaleId])
+  @@unique([vehicleSaleId])
   @@index([status])
 }
 

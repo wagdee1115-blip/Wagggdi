@@ -216,14 +216,11 @@ export async function confirmSalePayment(saleId: string, providerReference: stri
       tx.paymentTransaction.findUnique({ where: { providerReference } }),
       tx.paymentTransaction.findUnique({ where: { idempotencyKey } }),
     ]);
-    const completed = sale.status === 'ESCROW_HELD' || sale.fundsSecured;
+    const completed = sale.paymentVerified;
     if (completed) {
       if (!existingByProvider) throw new Error('PAYMENT_PROVIDER_REFERENCE_MISMATCH');
       if (!existingByIdempotency || existingByIdempotency.id !== existingByProvider.id) throw new Error('IDEMPOTENCY_KEY_REUSED');
-      const boundLedger = await tx.financialLedger.findFirst({ where: {
-        entryGroupId: `PAYMENT:${sale.id}`, relatedOperationId: sale.id, providerRef: providerReference,
-      }});
-      if (!boundLedger || existingByProvider.userId !== sale.buyerId || existingByProvider.currency !== 'YER' || !existingByProvider.amount.eq(sale.totalPaidYER)) {
+      if (existingByProvider.vehicleSaleId !== sale.id || existingByProvider.userId !== sale.buyerId || existingByProvider.currency !== 'YER' || !existingByProvider.amount.eq(sale.totalPaidYER)) {
         throw new Error('PAYMENT_SALE_MISMATCH');
       }
       return sale;
@@ -238,22 +235,40 @@ export async function confirmSalePayment(saleId: string, providerReference: stri
       throw new Error('ALREADY_PROCESSED');
     }
 
-    await tx.paymentTransaction.create({ data: { userId: sale.buyerId!, ownershipTransferId: null, amount: sale.totalPaidYER, currency: 'YER', provider: 'EXTERNAL', providerReference, idempotencyKey, status: 'SUCCESS' } });
+    await tx.paymentTransaction.create({ data: { userId: sale.buyerId!, ownershipTransferId: null, vehicleSaleId: sale.id, amount: sale.totalPaidYER, currency: 'YER', provider: 'EXTERNAL', providerReference, idempotencyKey, status: 'SUCCESS' } });
     const history = Array.isArray(sale.statusHistory) ? sale.statusHistory : [];
-    const nextHistory = [...history, { event: 'PAYMENT_CONFIRMED', at: now.toISOString(), providerReference }, { event: 'ESCROW_HELD', at: now.toISOString(), providerReference }];
+    const nextHistory = [...history, { event: 'PAYMENT_CONFIRMED', at: now.toISOString(), providerReference }];
+    const updated = await tx.vehicleSale.update({ where: { id: saleId }, data: { paymentVerified: true, fundsSecured: false, status: 'PAYMENT_CONFIRMED', statusHistory: nextHistory } });
+    await tx.saleAuditLog.create({ data: { vehicleSaleId: saleId, userId: sale.buyerId!, userName: sale.buyerName ?? '', action: 'PAYMENT_CONFIRMED', oldStatus: sale.status, newStatus: 'PAYMENT_CONFIRMED', reference: providerReference, metadata: { idempotencyKey } } });
+    return updated;
+  });
+}
 
-    await createDoubleEntry({ transactionId: sale.id, entryGroupId: `PAYMENT:${sale.id}`, amount: sale.totalPaidYER, currency: 'YER', debitType: 'CUSTOMER_FUNDS', creditType: 'ESCROW_FUNDS', userId: sale.buyerId ?? undefined, relatedOperationId: sale.id, providerRef: providerReference, idempotencyKey: `PAYMENT:${idempotencyKey}` }, tx);
-    if (new Prisma.Decimal(sale.platformFeeYER).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:PLATFORM:${sale.id}`, amount: sale.platformFeeYER, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'PLATFORM_FEES', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:PLATFORM:${sale.id}` }, tx);
-    if (new Prisma.Decimal(sale.transferFeeYER).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:TRANSFER:${sale.id}`, amount: sale.transferFeeYER, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'TRANSFER_FEES', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:TRANSFER:${sale.id}` }, tx);
-    if (new Prisma.Decimal(sale.auctionFeeYER).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:AUCTION:${sale.id}`, amount: sale.auctionFeeYER, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'AUCTION_FEES', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:AUCTION:${sale.id}` }, tx);
-    if (new Prisma.Decimal(sale.listingCommissionUSD).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:EXHIBITION:${sale.id}`, amount: new Prisma.Decimal(sale.listingCommissionUSD).mul(sale.exchangeRate), currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'LISTING_SALES_COMMISSION', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:EXHIBITION:${sale.id}` }, tx);
-    if (new Prisma.Decimal(sale.governmentFeesYER).gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:GOVERNMENT:${sale.id}`, amount: sale.governmentFeesYER, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType: 'GOVERNMENT_FEES', userId: sale.sellerId, relatedOperationId: sale.id, idempotencyKey: `FEE:GOVERNMENT:${sale.id}` }, tx);
-    if (new Prisma.Decimal(sale.bidDepositYER).gt(0) && sale.auctionId) {
-      await tx.auctionBidDeposit.updateMany({ where: { auctionId: sale.auctionId, bidderId: sale.buyerId!, status: 'HOLD' }, data: { status: 'APPLIED' } });
+export async function confirmEscrowHeld(params: { saleId: string; escrowProviderReference: string; paymentProviderReference: string; amountYER: Prisma.Decimal | number | string; currency: string }) {
+  if (!process.env.ESCROW_PROVIDER_URL || !process.env.ESCROW_PROVIDER_SECRET) throw new Error('NOT_CONFIGURED:ESCROW_PROVIDER_REQUIRED');
+  if (params.currency !== 'YER') throw new Error('ESCROW_CURRENCY_MISMATCH');
+  return db.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "VehicleSale" WHERE id = ${params.saleId} FOR UPDATE`;
+    const sale = await tx.vehicleSale.findUnique({ where: { id: params.saleId } });
+    if (!sale || !sale.buyerId) throw new Error('SALE_NOT_FOUND');
+    if (!new Prisma.Decimal(params.amountYER).eq(sale.totalPaidYER)) throw new Error('ESCROW_AMOUNT_MISMATCH');
+    const payment = await tx.paymentTransaction.findUnique({ where: { providerReference: params.paymentProviderReference } });
+    if (!payment || payment.vehicleSaleId !== sale.id || payment.userId !== sale.buyerId || !payment.amount.eq(sale.totalPaidYER) || payment.currency !== params.currency) throw new Error('ESCROW_PAYMENT_MISMATCH');
+    if (sale.fundsSecured || sale.status === 'ESCROW_HELD') {
+      if (sale.escrowTransactionId !== params.escrowProviderReference) throw new Error('ESCROW_PROVIDER_REFERENCE_MISMATCH');
+      return sale;
     }
-
-    const updated = await tx.vehicleSale.update({ where: { id: saleId }, data: { paymentVerified: true, fundsSecured: true, escrowTransactionId: providerReference, status: 'ESCROW_HELD', statusHistory: nextHistory } });
-    await tx.saleAuditLog.create({ data: { vehicleSaleId: saleId, userId: sale.buyerId!, userName: sale.buyerName ?? '', action: 'PAYMENT_CONFIRMED_ESCROW_HELD', oldStatus: sale.status, newStatus: 'ESCROW_HELD', reference: providerReference, metadata: { idempotencyKey } } });
+    if (sale.status !== 'PAYMENT_CONFIRMED') throw new Error(`INVALID_ESCROW_STATE:${sale.status}`);
+    const replay = await tx.escrowTransaction.findFirst({ where: { escrowProviderReference: params.escrowProviderReference, vehicleSaleId: { not: sale.id } } });
+    if (replay) throw new Error('ESCROW_PROVIDER_REFERENCE_REPLAY');
+    await tx.escrowTransaction.create({ data: { vehicleSaleId: sale.id, vehicleAmountYER: sale.vehicleAmountYER, platformFeeUSD: sale.platformFeeUSD, platformFeeYER: sale.platformFeeYER, transferFeeUSD: sale.transferFeeUSD, transferFeeYER: sale.transferFeeYER, listingCommissionUSD: sale.listingCommissionUSD, auctionFeeYER: sale.auctionFeeYER, governmentFeesYER: sale.governmentFeesYER, totalPaidYER: sale.totalPaidYER, sellerPayoutYER: sale.sellerPayoutYER, platformRevenueYER: sale.platformRevenueYER, exchangeRate: sale.exchangeRate, status: 'HELD', paymentProviderReference: params.paymentProviderReference, escrowProviderReference: params.escrowProviderReference, securedAt: new Date() } });
+    await createDoubleEntry({ transactionId: sale.id, entryGroupId: `ESCROW:${sale.id}`, amount: sale.totalPaidYER, currency: 'YER', debitType: 'CUSTOMER_FUNDS', creditType: 'ESCROW_FUNDS', userId: sale.buyerId, relatedOperationId: sale.id, providerRef: params.escrowProviderReference, idempotencyKey: `ESCROW:${sale.id}` }, tx);
+    const fees: Array<[string, Prisma.Decimal, string]> = [['PLATFORM', sale.platformFeeYER, 'PLATFORM_FEES'], ['TRANSFER', sale.transferFeeYER, 'TRANSFER_FEES'], ['AUCTION', sale.auctionFeeYER, 'AUCTION_FEES'], ['EXHIBITION', new Prisma.Decimal(sale.listingCommissionUSD).mul(sale.exchangeRate), 'LISTING_SALES_COMMISSION'], ['GOVERNMENT', sale.governmentFeesYER, 'GOVERNMENT_FEES']];
+    for (const [name, amount, creditType] of fees) if (amount.gt(0)) await createDoubleEntry({ transactionId: sale.id, entryGroupId: `FEE:${name}:${sale.id}`, amount, currency: 'YER', debitType: 'ESCROW_FUNDS', creditType, userId: sale.sellerId, relatedOperationId: sale.id, providerRef: params.escrowProviderReference, idempotencyKey: `FEE:${name}:${sale.id}` }, tx);
+    if (sale.auctionId && sale.bidDepositYER.gt(0)) await tx.auctionBidDeposit.updateMany({ where: { auctionId: sale.auctionId, bidderId: sale.buyerId, status: 'HOLD' }, data: { status: 'APPLIED' } });
+    const history = Array.isArray(sale.statusHistory) ? sale.statusHistory : [];
+    const updated = await tx.vehicleSale.update({ where: { id: sale.id }, data: { fundsSecured: true, escrowTransactionId: params.escrowProviderReference, status: 'ESCROW_HELD', statusHistory: [...history, { event: 'ESCROW_HELD', at: new Date().toISOString(), providerReference: params.escrowProviderReference }] } });
+    await tx.saleAuditLog.create({ data: { vehicleSaleId: sale.id, userId: sale.buyerId, userName: sale.buyerName ?? '', action: 'ESCROW_HELD', oldStatus: sale.status, newStatus: 'ESCROW_HELD', reference: params.escrowProviderReference, metadata: { paymentProviderReference: params.paymentProviderReference } } });
     return updated;
   });
 }
@@ -321,7 +336,7 @@ export async function releasePayout(saleId: string, actorId: string) {
     if (sale.status === 'PAYOUT_CONFIRMED') return { blocked: false as const, alreadyConfirmed: true as const, sale };
     if (sale.status === 'DISPUTED' || sale.status === 'MANUAL_REVIEW' || sale.status === 'PAYOUT_REVIEW_REQUIRED') throw new Error('PAYOUT_FROZEN');
     if (!sale.payoutProtectionUntil || sale.payoutProtectionUntil > new Date()) throw new Error('PAYOUT_PROTECTION_ACTIVE');
-    if (!['PAYOUT_PROTECTION', 'PAYOUT_PENDING'].includes(sale.status)) throw new Error('INVALID_PAYOUT_STATE');
+    if (!['PAYOUT_PROTECTION', 'PAYOUT_PENDING', 'RELEASE_FAILED'].includes(sale.status)) throw new Error('INVALID_PAYOUT_STATE');
     const payoutUserId = sale.payoutUserId ?? sale.sellerId;
     try {
       await assertPayoutAccount(tx, payoutUserId);
@@ -336,7 +351,9 @@ export async function releasePayout(saleId: string, actorId: string) {
       throw error;
     }
     const history = Array.isArray(sale.statusHistory) ? sale.statusHistory : [];
-    return { blocked: false as const, alreadyConfirmed: false as const, sale: await tx.vehicleSale.update({ where: { id: saleId }, data: { status: 'PAYOUT_PROCESSING', releaseReadyAt: new Date(), statusHistory: [...history, { event: 'PAYOUT_PROCESSING', at: new Date().toISOString(), actorId }] } }) };
+    const processing = await tx.vehicleSale.update({ where: { id: saleId }, data: { status: 'PAYOUT_PROCESSING', releaseReadyAt: new Date(), statusHistory: [...history, { event: sale.status === 'RELEASE_FAILED' ? 'PAYOUT_RETRY_STARTED' : 'PAYOUT_PROCESSING', at: new Date().toISOString(), actorId }] } });
+    await tx.saleAuditLog.create({ data: { vehicleSaleId: sale.id, userId: actorId, userName: actorId, action: sale.status === 'RELEASE_FAILED' ? 'PAYOUT_RETRY_STARTED' : 'PAYOUT_PROCESSING', oldStatus: sale.status, newStatus: 'PAYOUT_PROCESSING' } });
+    return { blocked: false as const, alreadyConfirmed: false as const, sale: processing };
   });
 
   if (claimed.blocked) throw new Error('PAYOUT_REVIEW_REQUIRED');
@@ -353,7 +370,14 @@ export async function releasePayout(saleId: string, actorId: string) {
     if (result.status !== 'SUCCESS' || !result.providerReference) throw new Error('PAYOUT_NOT_CONFIRMED');
     providerReference = result.providerReference;
   } catch (error) {
-    await db.vehicleSale.updateMany({ where: { id: claimed.sale.id, status: 'PAYOUT_PROCESSING' }, data: { status: 'RELEASE_FAILED' } });
+    await db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "VehicleSale" WHERE id = ${claimed.sale.id} FOR UPDATE`;
+      const current = await tx.vehicleSale.findUnique({ where: { id: claimed.sale.id } });
+      if (!current || current.status !== 'PAYOUT_PROCESSING') return;
+      const history = Array.isArray(current.statusHistory) ? current.statusHistory : [];
+      await tx.vehicleSale.update({ where: { id: current.id }, data: { status: 'RELEASE_FAILED', statusHistory: [...history, { event: 'PAYOUT_FAILED', at: new Date().toISOString(), actorId }] } });
+      await tx.saleAuditLog.create({ data: { vehicleSaleId: current.id, userId: actorId, userName: actorId, action: 'PAYOUT_FAILED', oldStatus: 'PAYOUT_PROCESSING', newStatus: 'RELEASE_FAILED' } });
+    });
     throw error;
   }
 
