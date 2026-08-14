@@ -1,4 +1,4 @@
-name: Next Security Upgrade Trial
+name: Apply Verified Next 16 Security Upgrade to Wave 1
 
 on:
   push:
@@ -6,12 +6,12 @@ on:
       - markabat-v4-wave1-next-security-trial
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  trial:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -29,75 +29,63 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/markabat_test
       NODE_ENV: test
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: markabat-v4-phase2-wave1-fix
+          fetch-depth: 0
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22.20.0'
-      - name: Pin npm
+
+      - name: Assert exact approved Wave 1 head
+        run: test "$(git rev-parse HEAD)" = "a79463afb1971904fd49510e9686d4a8093eb474"
+
+      - name: Install baseline
+        working-directory: backend
         run: |
           npm install -g npm@10.9.2
           test "$(npm --version)" = "10.9.2"
-      - name: Install baseline
-        run: npm ci --no-audit --no-fund
-      - name: Prepare Next 16 source compatibility in runner only
+          npm ci --no-audit --no-fund
+
+      - name: Apply verified Next 16 source compatibility
+        working-directory: backend
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import json, re
-
-          cookie_touched=[]
-          param_touched=[]
+          cookies=[]; params=[]
           for p in Path('.').rglob('*.ts'):
-              if 'node_modules' in p.parts or '.next' in p.parts:
-                  continue
-              s=p.read_text()
-              n=s
+              if 'node_modules' in p.parts or '.next' in p.parts: continue
+              s=p.read_text(); n=s
               if 'cookies().' in n:
-                  n=n.replace('cookies().', '(await cookies()).')
-                  cookie_touched.append(str(p))
+                  n=n.replace('cookies().', '(await cookies()).'); cookies.append(str(p))
               if 'app' in p.parts and 'api' in p.parts and p.name == 'route.ts':
-                  n2, count = re.subn(
-                      r'\{\s*params\s*\}\s*:\s*\{\s*params\s*:\s*\{([^{}]+)\}\s*\}',
-                      lambda m: '{ params }: { params: Promise<{'+m.group(1)+'}> }',
-                      n,
-                  )
-                  if count:
-                      n2 = re.sub(r'\bparams\.', '(await params).', n2)
-                      n = n2
-                      param_touched.append(str(p))
-              if n != s:
-                  p.write_text(n)
+                  n2,c=re.subn(r'\{\s*params\s*\}\s*:\s*\{\s*params\s*:\s*\{([^{}]+)\}\s*\}',lambda m:'{ params }: { params: Promise<{'+m.group(1)+'}> }',n)
+                  if c:
+                      n=re.sub(r'\bparams\.', '(await params).', n2); params.append(str(p))
+              if n != s: p.write_text(n)
+          if len(cookies) != 5: raise SystemExit(f'COOKIE_MIGRATION_COUNT:{len(cookies)}')
+          if len(params) != 26: raise SystemExit(f'PARAM_MIGRATION_COUNT:{len(params)}')
 
-          middleware=Path('middleware.ts')
-          proxy=Path('proxy.ts')
-          if middleware.exists():
-              m=middleware.read_text()
-              if 'export function middleware' not in m:
-                  raise SystemExit('middleware export target not found')
-              proxy.write_text(m.replace('export function middleware', 'export function proxy', 1))
-              middleware.unlink()
+          middleware=Path('middleware.ts'); proxy=Path('proxy.ts')
+          if not middleware.exists() or proxy.exists(): raise SystemExit('MIDDLEWARE_BASELINE_MISMATCH')
+          m=middleware.read_text()
+          if m.count('export function middleware') != 1: raise SystemExit('MIDDLEWARE_EXPORT_MISMATCH')
+          proxy.write_text(m.replace('export function middleware','export function proxy',1)); middleware.unlink()
 
-          ts=Path('tsconfig.json')
-          data=json.loads(ts.read_text())
+          ts=Path('tsconfig.json'); data=json.loads(ts.read_text())
           data['compilerOptions']['jsx']='react-jsx'
-          include=data.setdefault('include',[])
-          if '.next/dev/types/**/*.ts' not in include:
-              include.insert(2, '.next/dev/types/**/*.ts')
-          ts.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
-
-          print('ASYNC_COOKIE_PATCHES', *cookie_touched, sep='\n')
-          print('ASYNC_PARAM_PATCHES', *param_touched, sep='\n')
-          if len(param_touched) < 20:
-              raise SystemExit(f'expected broad dynamic-route migration, got {len(param_touched)} files')
+          inc=data.setdefault('include',[])
+          if '.next/dev/types/**/*.ts' not in inc: inc.insert(2,'.next/dev/types/**/*.ts')
+          ts.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+          print('MIGRATED_COOKIES',len(cookies)); print('MIGRATED_DYNAMIC_ROUTES',len(params))
           PY
+
           cat > scripts/verify-css-output.mjs <<'EOF'
           import { readdir, readFile, stat } from 'node:fs/promises';
           import path from 'node:path';
-
           const staticDir = path.resolve(process.cwd(), '.next', 'static');
           function fail(message) { console.error(`CSS_BUILD_GATE_FAILED: ${message}`); process.exit(1); }
           const cssFiles = [];
@@ -112,31 +100,47 @@ jobs:
             }
           }
           await walk(staticDir);
-          if (cssFiles.length === 0) fail('no compiled CSS files were emitted by Next.js');
-          let totalBytes = 0;
-          let compiledCss = '';
-          for (const file of cssFiles) { const fileStat = await stat(file); totalBytes += fileStat.size; compiledCss += `\n${await readFile(file, 'utf8')}`; }
-          if (totalBytes < 2_000) fail(`compiled CSS is unexpectedly small (${totalBytes} bytes)`);
-          const requiredSelectors = ['.min-h-screen','.grid-cols-2','.rounded-3xl','.bg-slate-50','.text-primary-900'];
-          const missing = requiredSelectors.filter((selector) => !compiledCss.includes(selector));
-          if (missing.length > 0) fail(`Tailwind utilities missing from compiled CSS: ${missing.join(', ')}`);
+          if (!cssFiles.length) fail('no compiled CSS files were emitted by Next.js');
+          let totalBytes=0, compiledCss='';
+          for (const file of cssFiles) { const s=await stat(file); totalBytes+=s.size; compiledCss+=`\n${await readFile(file,'utf8')}`; }
+          if (totalBytes < 2000) fail(`compiled CSS is unexpectedly small (${totalBytes} bytes)`);
+          const required=['.min-h-screen','.grid-cols-2','.rounded-3xl','.bg-slate-50','.text-primary-900'];
+          const missing=required.filter(x=>!compiledCss.includes(x));
+          if (missing.length) fail(`Tailwind utilities missing from compiled CSS: ${missing.join(', ')}`);
           console.log(`CSS_BUILD_GATE_PASS: ${cssFiles.length} CSS file(s), ${totalBytes} bytes, Tailwind utilities verified.`);
           EOF
-      - name: Apply Next 16 candidate in runner only
+
+      - name: Upgrade framework dependencies
+        working-directory: backend
         run: npm install --save-exact next@16.3.1 react@19.2.8 react-dom@19.2.8 @types/react@19 @types/react-dom@19 --no-audit --no-fund
-      - name: Audit production dependencies
+
+      - name: Audit gate
+        working-directory: backend
         run: |
           npm audit --omit=dev --json > /tmp/audit.json || true
-          node -e "const a=require('/tmp/audit.json'); console.log('AUDIT_COUNTS',JSON.stringify(a.metadata?.vulnerabilities||{})); if((a.metadata?.vulnerabilities?.high||0)>0 || (a.metadata?.vulnerabilities?.critical||0)>0) process.exit(1);"
-      - name: Prisma validate and migrate
+          node -e "const a=require('/tmp/audit.json'); const v=a.metadata?.vulnerabilities||{}; console.log('AUDIT_COUNTS',JSON.stringify(v)); if((v.high||0)>0||(v.critical||0)>0) process.exit(1)"
+
+      - name: Prisma gates
+        working-directory: backend
         run: |
           npx prisma validate
           npx prisma generate
           npx prisma migrate deploy
           npx prisma migrate status
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Full tests
-        run: npm test
-      - name: Production build
-        run: npm run build
+
+      - name: Typecheck tests build
+        working-directory: backend
+        run: |
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Commit and push Wave 1 security upgrade
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A backend
+          git diff --cached --check
+          git commit -m 'security: upgrade Wave 1 to Next 16.3.1 [verified]'
+          git push origin HEAD:markabat-v4-phase2-wave1-fix
