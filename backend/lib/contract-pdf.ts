@@ -67,8 +67,7 @@ export class ContractPdfService {
 <meta charset="UTF-8">
 <title>عقد بيع مركبة - ${data.contractNumber}</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap');
-  * { font-family: 'Tajawal', sans-serif; }
+  * { font-family: Tahoma, Arial, sans-serif; }
   body { padding: 40px; color: #111; background: white; }
   .header { text-align: center; border-bottom: 3px solid #0f3d2e; padding-bottom: 20px; margin-bottom: 30px; }
   .logo { font-size: 28px; font-weight: 900; color: #0f3d2e; }
@@ -146,7 +145,7 @@ export class ContractPdfService {
       ${data.financial.auctionFeeYER ? `<tr><td>رسوم المزاد</td><td>${data.financial.auctionFeeYER.toLocaleString()} YER</td><td>2.5% من قيمة البيع النهائية</td></tr>` : ''}
       <tr><td>الرسوم الحكومية</td><td>${data.financial.governmentFeesYER.toLocaleString()} YER</td><td>حالياً 0</td></tr>
       <tr style="background: #f0fdf4; font-weight: 900;"><td>الإجمالي المدفوع من المشتري</td><td>${data.financial.totalPaidYER.toLocaleString()} YER</td><td>إلى حساب الوسيط</td></tr>
-      <tr style="background: #fef3c7;"><td>المبلغ المحول للبائع</td><td>${data.financial.sellerPayoutYER.toLocaleString()} YER</td><td>قيمة المركبة فقط - بعد 15 دقيقة من نجاح النقل</td></tr>
+      <tr style="background: #fef3c7;"><td>المبلغ المحول للبائع</td><td>${data.financial.sellerPayoutYER.toLocaleString()} YER</td><td>قيمة المركبة فقط - بعد انتهاء فترة حماية الصرف</td></tr>
       <tr><td>طريقة الدفع</td><td>${data.financial.paymentMethod}</td><td>${data.financial.paymentStatus}</td></tr>
       <tr><td>سعر الصرف المثبت</td><td>1 USD = ${data.financial.exchangeRate} YER</td><td>مثبت وقت العملية - لا يتغير</td></tr>
     </table>
@@ -162,7 +161,7 @@ export class ContractPdfService {
       <tr><td>موافقة البائع</td><td>${data.approvals.sellerApprovedAt?.toLocaleString('ar-YE') || '-'}</td><td>${data.approvals.sellerApprovedAt ? '✅ تم' : '⏳'}</td></tr>
       <tr><td>OTP البائع</td><td>${data.approvals.sellerOtpVerifiedAt?.toLocaleString('ar-YE') || '-'}</td><td>${data.approvals.sellerOtpVerifiedAt ? '✅ تم التحقق' : '⏳'}</td></tr>
       <tr><td>نقل الملكية</td><td>${data.transfer.transferDate.toLocaleString('ar-YE')}</td><td>${data.transfer.status}</td></tr>
-      ${data.transfer.governmentReference ? `<tr><td>مرجع المرور</td><td>${data.transfer.governmentReference}</td><td>رسمي</td></tr>` : ''}
+      ${data.transfer.governmentReference ? `<tr><td>مرجع مزود المرور</td><td>${data.transfer.governmentReference}</td><td>صفة الاعتماد الرسمي يحددها المرور</td></tr>` : ''}
     </table>
   </div>
 
@@ -209,19 +208,6 @@ export class ContractPdfService {
     `;
   }
 
-  // للطباعة أو التحويل لـ PDF في المتصفح
-  async generatePdfBlob(html: string): Promise<Blob> {
-    // في المتصفح: يمكن استخدام window.print أو مكتبة jsPDF
-    // هنا نرجع HTML كـ Blob للطباعة
-    return new Blob([html], { type: 'text/html' });
-  }
-
-  generateContractNumber(): string {
-    const date = new Date();
-    const year = date.getFullYear();
-    const random = Math.random().toString(36).substr(2, 6).toUpperCase();
-    return `MRK-CONTRACT-${year}-${random}`;
-  }
 }
 
 export const contractPdfService = new ContractPdfService();

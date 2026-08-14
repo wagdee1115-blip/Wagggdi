@@ -45,6 +45,14 @@ enum PhoneVerificationStatus {
   FAILED
   EXPIRED
 }
+enum PhoneChangeStatus {
+  OTP_PENDING
+  SECURITY_DELAY
+  ACTIVATED
+  CANCELLED
+  EXPIRED
+  FAILED
+}
 enum VehicleStatus {
   DRAFT
   PENDING
@@ -216,6 +224,7 @@ model User {
   handoverBuyer HandoverEvidence[] @relation("HandoverBuyer")
   handoverSeller HandoverEvidence[] @relation("HandoverSeller")
   passwordResetRequests PasswordResetRequest[]
+  phoneChangeRequests PhoneChangeRequest[]
   listingViews ListingView[]
   comments Comment[]
   commentReports CommentReport[] @relation("CommentReports")
@@ -233,6 +242,8 @@ model IdentityVerification {
   verifiedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerReference])
 }
 
 model PhoneVerification {
@@ -342,6 +353,8 @@ model Conversation {
   updatedAt DateTime @updatedAt
   participants ConversationParticipant[]
   messages Message[]
+
+  @@index([updatedAt, id])
 }
 
 model ConversationParticipant {
@@ -352,6 +365,7 @@ model ConversationParticipant {
   user User @relation(fields: [userId], references: [id])
   joinedAt DateTime @default(now())
   @@unique([conversationId, userId])
+  @@index([userId, conversationId])
 }
 
 model Message {
@@ -363,6 +377,8 @@ model Message {
   content String @db.Text
   isRead Boolean @default(false)
   createdAt DateTime @default(now())
+
+  @@index([conversationId, createdAt, id])
 }
 
 model OwnershipTransferRequest {
@@ -415,6 +431,8 @@ model PaymentTransaction {
   user User @relation(fields: [userId], references: [id])
   ownershipTransferId String?
   ownershipTransfer OwnershipTransferRequest? @relation(fields: [ownershipTransferId], references: [id])
+  vehicleSaleId String? @unique
+  vehicleSale VehicleSale? @relation(fields: [vehicleSaleId], references: [id])
   amount Decimal
   currency String @default("YER")
   provider String
@@ -523,11 +541,12 @@ model AuctionBidDeposit {
   amount Decimal
   currency String @default("YER")
   status BidDepositStatus @default(PENDING)
-  providerReference String?
+  providerReference String? @unique
   idempotencyKey String @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([auctionId, bidderId])
   @@index([auctionId, bidderId, status])
 }
 
@@ -650,6 +669,10 @@ enum SaleStatus {
   PAYOUT_CONFIRMED
   DISPUTED
   PAYOUT_REVIEW_REQUIRED
+  REFUND_PENDING
+  REFUND_PROCESSING
+  REFUNDED
+  REFUND_FAILED
   FAILED
   MANUAL_REVIEW
 }
@@ -735,6 +758,14 @@ model VehicleSale {
   auction Auction? @relation("AuctionSale", fields: [auctionId], references: [id])
   handoverConfirmedAt DateTime?
   payoutProtectionUntil DateTime?
+  payoutProviderReference String? @unique
+  refundProviderReference String? @unique
+  refundIdempotencyKey String? @unique
+  refundReason String?
+  refundFailureReason String?
+  refundProcessingAt DateTime?
+  refundedAt DateTime?
+  refundAttempts Int @default(0)
   
   contractId String?
   electronicDocumentUrl String?
@@ -746,6 +777,7 @@ model VehicleSale {
   expiresAt DateTime
   
   payments SalePayment[]
+  paymentTransaction PaymentTransaction?
   auditLogs SaleAuditLog[]
   contract SaleContract?
   receipts PaymentReceipt[]
@@ -892,6 +924,7 @@ model OtpRecord {
   @@index([requestIpHash, createdAt])
   @@index([deviceHash, createdAt])
   @@index([operationId, type, createdAt])
+  @@index([userId, createdAt])
 }
 
 // Add relations to existing User and Vehicle models - SAFE EXTENSIONS
@@ -929,14 +962,15 @@ model EscrowTransaction {
   exchangeRate Decimal
   
   status String @default("HELD")
-  paymentProviderReference String?
+  paymentProviderReference String? @unique
+  escrowProviderReference String? @unique
   
   createdAt DateTime @default(now())
   securedAt DateTime?
   releaseReadyAt DateTime?
   updatedAt DateTime @updatedAt
   
-  @@index([vehicleSaleId])
+  @@unique([vehicleSaleId])
   @@index([status])
 }
 
@@ -1142,7 +1176,7 @@ model PayoutAccount {
   accountHolderName String
   verified Boolean @default(false)
   nameMatchStatus String @default("PENDING")
-  providerReference String?
+  providerReference String? @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([userId, verified])
@@ -1284,6 +1318,7 @@ model PasswordResetRequest {
   otpId String
   operationId String @unique
   recoveryTokenHash String @unique
+  expectedSessionVersion Int
   riskLevel RiskLevel @default(LOW)
   verifiedAt DateTime?
   completedAt DateTime?
@@ -1291,6 +1326,43 @@ model PasswordResetRequest {
   createdAt DateTime @default(now())
   @@index([userId, createdAt])
   @@index([otpId])
+}
+
+model PhoneChangeRequest {
+  id String @id
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  oldPhone String
+  newPhone String
+  newPhoneMasked String
+  status PhoneChangeStatus @default(OTP_PENDING)
+  activeUserKey String? @unique
+  reservedPhoneKey String? @unique
+  expectedSessionVersion Int
+  otpDeliveryId String @unique
+  otpHash String?
+  otpAttempts Int @default(0)
+  otpMaxAttempts Int @default(5)
+  otpExpiresAt DateTime
+  resendAvailableAt DateTime
+  requestExpiresAt DateTime
+  otpVerifiedAt DateTime?
+  activateAt DateTime?
+  activatedAt DateTime?
+  cancelledAt DateTime?
+  expiredAt DateTime?
+  provider String
+  providerReference String?
+  requestIpHash String?
+  deviceHash String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status, activateAt])
+  @@index([requestExpiresAt])
+  @@index([requestIpHash, createdAt])
+  @@index([deviceHash, createdAt])
 }
 
 

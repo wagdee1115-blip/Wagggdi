@@ -1,4 +1,21 @@
 import { getCurrentUser } from '@/lib/api-auth';
-import { db } from '@/lib/db';
-import { otpService } from '@/lib/otp';
-export async function POST(req:Request,{params}:{params:{id:string}}){try{const u=await getCurrentUser();if(!u)return Response.json({ok:false,error:'UNAUTHORIZED'},{status:401});const auth=await db.vehicleAuthorization.findUnique({where:{id:params.id},include:{authorizedUser:true}});if(!auth||auth.authorizedUserId!==u.id)return Response.json({ok:false,error:'FORBIDDEN'},{status:403});const result=await otpService.sendOtp({phone:auth.authorizedUser.phone,operationId:auth.id,type:'BUYER',ip:req.headers.get('x-forwarded-for')?.split(',')[0]?.trim(),deviceId:req.headers.get('x-device-id')??undefined});return Response.json({ok:true,otpId:result.otpId,expiresAt:result.expiresAt,providerReference:result.providerReference});}catch(e){const msg=e instanceof Error?e.message:'OTP_FAILED';return Response.json({ok:false,error:msg},{status:msg.startsWith('NOT_CONFIGURED')?503:400});}}
+import { requestAuthorizationOtp } from '@/lib/authorization';
+import { getTrustedClientIp } from '@/lib/request-identity';
+import { authorizationErrorResponse } from '../../../authorization-view';
+
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getCurrentUser();
+  if (!user) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+  try {
+    const result = await requestAuthorizationOtp({
+      authorizationId: (await params).id,
+      actorId: user.id,
+      party: 'AUTHORIZED',
+      ip: getTrustedClientIp(req),
+      deviceId: req.headers.get('x-device-id')?.slice(0, 200) || undefined,
+    });
+    return Response.json({ ok: true, otpId: result.otpId, expiresAt: result.expiresAt }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    return authorizationErrorResponse(error, 'OTP_REQUEST_FAILED');
+  }
+}

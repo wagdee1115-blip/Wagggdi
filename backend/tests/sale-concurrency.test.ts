@@ -2,15 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { db } from '../lib/db';
 import { createOwnershipTransfer } from '../lib/transfer-workflow';
 
+const dbIt = process.env.DATABASE_URL ? it : it.skip;
+
 describe('Direct sale PostgreSQL concurrency',()=>{
-  it('permits one sale lock winner only', async()=>{
-    if(!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt('permits one sale lock winner only', async()=>{
     const s=String(Date.now());
-    const seller=await db.user.create({data:{fullName:'SALE SELLER',phone:`774${s.slice(-7)}`,passwordHash:'test',status:'ACTIVE',phoneStatus:'VERIFIED'}});
-    const buyerA=await db.user.create({data:{fullName:'BUYER A',phone:`773${s.slice(-7)}`,passwordHash:'test',status:'ACTIVE',phoneStatus:'VERIFIED'}});
-    const buyerB=await db.user.create({data:{fullName:'BUYER B',phone:`772${s.slice(-7)}`,passwordHash:'test',status:'ACTIVE',phoneStatus:'VERIFIED'}});
+    const seller=await db.user.create({data:{fullName:'SALE SELLER',phone:`774${s.slice(-7)}`,nationalId:`SALE-S-${s}`,passwordHash:'test',status:'ACTIVE',phoneStatus:'VERIFIED',identityStatus:'VERIFIED'}});
+    const buyerA=await db.user.create({data:{fullName:'BUYER A',phone:`773${s.slice(-7)}`,nationalId:`SALE-A-${s}`,passwordHash:'test',status:'ACTIVE',phoneStatus:'VERIFIED',identityStatus:'VERIFIED'}});
+    const buyerB=await db.user.create({data:{fullName:'BUYER B',phone:`772${s.slice(-7)}`,nationalId:`SALE-B-${s}`,passwordHash:'test',status:'ACTIVE',phoneStatus:'VERIFIED',identityStatus:'VERIFIED'}});
     const payout=await db.payoutAccount.create({data:{userId:seller.id,provider:'TEST_BANK',accountIdentifierEncrypted:'test-encrypted',accountIdentifierMasked:'****0001',accountHolderName:seller.fullName,verified:true,nameMatchStatus:'MATCH',providerReference:`PAYOUT-TEST-${s}`}});
-    const vehicle=await db.vehicle.create({data:{ownerId:seller.id,plateNumber:`S-${s.slice(-10)}`,vin:`SALE${s}`.slice(0,17),make:'TEST',model:'TEST',year:2026,price:1000000,mileage:0,transmission:'AUTO',fuelType:'PETROL',color:'WHITE',city:'Sanaa',status:'ACTIVE'}});
+    const vehicle=await db.vehicle.create({data:{ownerId:seller.id,plateNumber:`S-${s.slice(-10)}`,vin:`SALE${s}`.slice(0,17),make:'TEST',model:'TEST',year:2026,price:1000000,mileage:0,transmission:'AUTO',fuelType:'PETROL',color:'WHITE',city:'Sanaa',status:'ACTIVE',governmentStatus:'VERIFIED'}});
     const rate=await db.exchangeRate.create({data:{usdToYer:535,source:'MANUAL',isAutoUpdateEnabled:false,updatedBy:seller.id,updatedByName:seller.fullName}});
     try{
       const results=await Promise.allSettled([

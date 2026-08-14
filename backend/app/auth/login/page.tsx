@@ -1,17 +1,21 @@
 'use client';
 
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
 import { ArrowRight, LogIn, ShieldCheck } from 'lucide-react';
+import { safeInternalDestination } from '@/lib/safe-navigation';
 
 const messages: Record<string, string> = {
   INVALID_INPUT: 'تحقق من رقم الجوال أو البريد وكلمة المرور.',
   INVALID_CREDENTIALS: 'بيانات الدخول غير صحيحة.',
-  ACCOUNT_UNAVAILABLE: 'الحساب غير مفعل بعد. أكمل التحقق من رقم الجوال أولاً.',
+  ACCOUNT_UNAVAILABLE: 'الحساب غير متاح للدخول حاليًا. أكمل التفعيل أو تواصل مع الدعم.',
   RATE_LIMITED: 'محاولات كثيرة. حاول مرة أخرى بعد قليل.',
   LOGIN_FAILED: 'تعذر تسجيل الدخول حالياً.',
 };
 
 export default function LoginPage() {
+  const router = useRouter();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,7 +33,10 @@ export default function LoginPage() {
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'LOGIN_FAILED');
-      window.location.href = '/';
+      const requested = new URLSearchParams(window.location.search).get('next');
+      const destination = safeInternalDestination(requested, window.location.origin);
+      router.replace(destination);
+      router.refresh();
     } catch (e) {
       const code = e instanceof Error ? e.message : 'LOGIN_FAILED';
       setError(messages[code] || code);
@@ -41,9 +48,9 @@ export default function LoginPage() {
   return (
     <main dir="rtl" className="min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-md">
-        <a href="/" className="mb-5 inline-flex items-center gap-2 text-sm font-bold text-primary-900">
+        <Link href="/" className="mb-5 inline-flex items-center gap-2 text-sm font-bold text-primary-900">
           <ArrowRight size={18} /> الرئيسية
-        </a>
+        </Link>
 
         <section className="rounded-3xl border bg-white p-6 shadow-sm md:p-8">
           <div className="mb-6 flex items-center gap-3">
@@ -68,7 +75,7 @@ export default function LoginPage() {
             </label>
 
             <label className="block text-sm font-bold">
-              كلمة المرور
+              <span className="flex items-center justify-between gap-3"><span>كلمة المرور</span><Link href="/auth/forgot-password" className="text-xs font-bold text-primary-900">نسيت كلمة المرور؟</Link></span>
               <input
                 required
                 minLength={8}
@@ -81,7 +88,7 @@ export default function LoginPage() {
               />
             </label>
 
-            {error && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+            {error && <div role="alert" aria-live="polite" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
             <button disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary-900 px-5 py-3 font-bold text-white disabled:opacity-60">
               <LogIn size={19} /> {loading ? 'جارٍ تسجيل الدخول...' : 'دخول'}
@@ -89,7 +96,7 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 border-t pt-5 text-center text-sm text-slate-600">
-            ليس لديك حساب؟ <a href="/auth/register" className="font-bold text-primary-900">إنشاء حساب</a>
+            ليس لديك حساب؟ <Link href="/auth/register" className="font-bold text-primary-900">إنشاء حساب</Link>
           </div>
         </section>
       </div>

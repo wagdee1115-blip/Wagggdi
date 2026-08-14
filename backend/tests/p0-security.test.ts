@@ -4,11 +4,16 @@ import { getTrustedClientIp, rateLimitTarget } from '../lib/request-identity';
 import { passwordResetPublicResponse, REGISTRATION_DUPLICATE_RESPONSE } from '../lib/auth-public-contracts';
 import { consumeRateLimit } from '../lib/rate-limit';
 
+const dbIt = process.env.DATABASE_URL ? it : it.skip;
+
 describe('P0 account-status boundary', () => {
   it('blocks a PENDING authenticated user', () => expect(isActiveAccount({ status: 'PENDING' })).toBe(false));
   it('blocks a SUSPENDED authenticated user', () => expect(isActiveAccount({ status: 'SUSPENDED' })).toBe(false));
   it('blocks a BANNED authenticated user', () => expect(isActiveAccount({ status: 'BANNED' })).toBe(false));
-  it('blocks a suspended privileged user without role exceptions', () => expect(isActiveAccount({ status: 'SUSPENDED', role: 'OWNER' } as any)).toBe(false));
+  it('blocks a suspended privileged user without role exceptions', () => {
+    const suspendedOwner = { status: 'SUSPENDED', role: 'OWNER' };
+    expect(isActiveAccount(suspendedOwner)).toBe(false);
+  });
 });
 
 describe('P0 enumeration-safe public contracts', () => {
@@ -61,8 +66,7 @@ describe('P0 trusted request identity', () => {
 });
 
 describe('P0 registration abuse control', () => {
-  it('enforces the server-side target limit independently of headers', async () => {
-    if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt('enforces the server-side target limit independently of headers', async () => {
     const key = `register:test:${Date.now()}:${Math.random()}`;
     await consumeRateLimit(key, 3, 60 * 60 * 1000);
     await consumeRateLimit(key, 3, 60 * 60 * 1000);
