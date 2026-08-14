@@ -106,15 +106,20 @@ describe('Financial integrity', () => {
         expect(fetchSpy).toHaveBeenCalledTimes(1);
       } finally { fetchSpy.mockRestore(); }
     } finally {
-      await db.notification.deleteMany({ where: { operationId: sale.id } });
-      await db.financialLedger.deleteMany({ where: { transactionId: sale.id } });
-      await db.escrowTransaction.deleteMany({ where: { vehicleSaleId: sale.id } });
-      await db.paymentTransaction.deleteMany({ where: { vehicleSaleId: sale.id } });
-      await db.saleAuditLog.deleteMany({ where: { vehicleSaleId: sale.id } });
-      await db.salePayment.deleteMany({ where: { vehicleSaleId: sale.id } });
-      await db.paymentReceipt.deleteMany({ where: { vehicleSaleId: sale.id } });
-      await db.saleContract.deleteMany({ where: { vehicleSaleId: sale.id } });
-      await db.vehicleSale.delete({ where: { id: sale.id } });
+      // A failed assertion can occur while one of the deliberately-created
+      // secondary sales still exists. Clean every sale owned by this unique
+      // fixture so teardown preserves the original failure instead of masking
+      // it with VehicleSale_vehicleId_fkey.
+      const saleIds = (await db.vehicleSale.findMany({ where: { vehicleId: vehicle.id }, select: { id: true } })).map(({ id }) => id);
+      await db.notification.deleteMany({ where: { operationId: { in: saleIds } } });
+      await db.financialLedger.deleteMany({ where: { transactionId: { in: saleIds } } });
+      await db.escrowTransaction.deleteMany({ where: { vehicleSaleId: { in: saleIds } } });
+      await db.paymentTransaction.deleteMany({ where: { vehicleSaleId: { in: saleIds } } });
+      await db.saleAuditLog.deleteMany({ where: { vehicleSaleId: { in: saleIds } } });
+      await db.salePayment.deleteMany({ where: { vehicleSaleId: { in: saleIds } } });
+      await db.paymentReceipt.deleteMany({ where: { vehicleSaleId: { in: saleIds } } });
+      await db.saleContract.deleteMany({ where: { vehicleSaleId: { in: saleIds } } });
+      await db.vehicleSale.deleteMany({ where: { id: { in: saleIds } } });
       await db.exchangeRateHistory.deleteMany({ where: { exchangeRateId: rate.id } });
       await db.exchangeRate.delete({ where: { id: rate.id } });
       await db.vehicle.delete({ where: { id: vehicle.id } });
