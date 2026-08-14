@@ -1,5 +1,7 @@
 export const FEES = Object.freeze({
-  PLATFORM_USD: 20,
+  // The approved ownership-transfer price is USD 80 total, inclusive.
+  // Keep PLATFORM_USD at zero so no second USD 20 charge is layered on top.
+  PLATFORM_USD: 0,
   DIRECT_MARKET_LISTING_COMMISSION_USD: 0,
   EXHIBITION_LISTING_SALES_COMMISSION_USD: 100,
   TRANSFER_USD: 80,

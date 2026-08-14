@@ -2,8 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "crons": [
-    { "path": "/api/cron/auctions/finalize", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/sales/expire", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/authorizations/expire", "schedule": "0 * * * *" }
+    { "path": "/api/cron/maintenance", "schedule": "0 0 * * *" }
   ]
 }

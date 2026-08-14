@@ -19,7 +19,8 @@ export class ExchangeRateManager {
     const operation=await db.operation.findUnique({where:{id:params.requestId}});if(!operation||operation.type!=='EXCHANGE_RATE_CHANGE')throw new Error('REQUEST_NOT_FOUND');if(operation.status!=='PENDING')throw new Error('REQUEST_NOT_PENDING');
     const metadata=(operation.metadata&&typeof operation.metadata==='object'?operation.metadata:{}) as Record<string,unknown>;
     if(String(metadata.otpId||'')!==params.otpId)throw new Error('OTP_MISMATCH');
-    await this.otpService.verifyOtp({otpId:params.otpId,otp:params.otp,operationId:operation.id,type:'SELLER'});
+    if(operation.userId!==params.confirmedBy)throw new Error('FORBIDDEN');
+    await this.otpService.verifyOtp({otpId:params.otpId,otp:params.otp,operationId:operation.id,type:'SELLER',userId:params.confirmedBy});
     const result=await this.provider.updateRate({newRate:Number(metadata.newRate),updatedBy:params.confirmedBy,updatedByName:params.confirmedByName,reason:String(metadata.reason||''),source:'MANUAL'});
     await db.operation.update({where:{id:operation.id},data:{status:'SUCCESS',providerReference:result.newRate.id}});
     return result;

@@ -4,3 +4,4 @@
 html{background:#f8fafc}
 body{margin:0;font-family:Arial,Tahoma,sans-serif;color:#0f172a}
 button,a,input{font:inherit}
+@media (max-width:767px){body{padding-bottom:calc(4rem + env(safe-area-inset-bottom))}}

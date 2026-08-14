@@ -75,7 +75,8 @@ export class RBACService {
     return permissions.includes(permission);
   }
 
-  canAccessResource(userRole: Role, resource: string, action: string, condition?: any): boolean {
+  canAccessResource(userRole: Role, resource: string, action: string, condition?: unknown): boolean {
+    void condition;
     // RBAC أساسي + ABAC مستقبلاً
     // WHO CAN DO WHAT ON WHICH RESOURCE UNDER WHICH CONDITION
 

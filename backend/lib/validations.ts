@@ -1,12 +1,10 @@
 import { z } from 'zod';
 
 export const registerSchema = z.object({
-  fullName: z.string().min(3),
-  nationalId: z.string().min(8).max(20).optional(),
-  dateOfBirth: z.string().optional(),
-  phone: z.string().min(9),
-  email: z.string().email().optional(),
-  password: z.string().min(8),
+  fullName: z.string().trim().min(3).max(120),
+  phone: z.string().trim().regex(/^\+?[0-9]{9,15}$/),
+  email: z.string().trim().email().max(254).toLowerCase().optional(),
+  password: z.string().min(10).max(200),
 });
 
 export const vehicleSchema = z.object({

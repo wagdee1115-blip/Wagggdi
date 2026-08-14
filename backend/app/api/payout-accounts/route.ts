@@ -1,5 +1,37 @@
 import { z } from 'zod';
-import { getCurrentUser } from '@/lib/api-auth';
-import { verifyPayoutAccount } from '@/lib/payout-account';
-const schema=z.object({provider:z.string().min(2).max(100),accountIdentifierEncrypted:z.string().min(4),accountIdentifierMasked:z.string().min(4).max(100),accountHolderName:z.string().min(2).max(200)});
-export async function POST(req:Request){try{const u=await getCurrentUser();if(!u)return Response.json({ok:false,error:'UNAUTHORIZED'},{status:401});const p=schema.safeParse(await req.json());if(!p.success)return Response.json({ok:false,error:'INVALID_INPUT'},{status:400});const account=await verifyPayoutAccount({userId:u.id,...p.data});return Response.json({ok:true,account});}catch(e){const m=e instanceof Error?e.message:'PAYOUT_ACCOUNT_FAILED';return Response.json({ok:false,error:m},{status:m.startsWith('NOT_CONFIGURED')?503:400});}}
+import { getCurrentUser, safeApiErrorCode } from '@/lib/api-auth';
+import { db } from '@/lib/db';
+import { payoutAccountPublicSelect, verifyPayoutAccount } from '@/lib/payout-account';
+
+const schema = z.object({
+  provider: z.string().trim().min(2).max(100).transform(value => value.toLocaleUpperCase('en-US')),
+  accountIdentifier: z.string().trim().min(4).max(200),
+  accountHolderName: z.string().trim().min(2).max(200),
+}).strict();
+
+export async function GET() {
+  const user = await getCurrentUser();
+  if (!user) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+  const accounts = await db.payoutAccount.findMany({ where: { userId: user.id }, select: payoutAccountPublicSelect, orderBy: { createdAt: 'desc' } });
+  return Response.json({ ok: true, accounts }, { headers: { 'Cache-Control': 'no-store' } });
+}
+
+export async function POST(req: Request) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+    const parsed = schema.safeParse(await req.json());
+    if (!parsed.success) return Response.json({ ok: false, error: 'INVALID_INPUT', details: parsed.error.flatten() }, { status: 400 });
+    const account = await verifyPayoutAccount({ userId: user.id, ...parsed.data });
+    const safeAccount = await db.payoutAccount.findUniqueOrThrow({ where: { id: account.id }, select: payoutAccountPublicSelect });
+    return Response.json({ ok: true, account: safeAccount });
+  } catch (error) {
+    const message = safeApiErrorCode(error);
+    const status = message === 'INTERNAL_ERROR' ? 500
+      : message.startsWith('NOT_CONFIGURED') || message.startsWith('INVALID_CONFIG') ? 503
+        : ['BANK_PROVIDER_FAILED', 'BANK_PROVIDER_UNAVAILABLE', 'BANK_PROVIDER_RESPONSE_INVALID'].includes(message) ? 502
+          : ['IDENTITY_NOT_VERIFIED', 'PHONE_NOT_VERIFIED', 'PAYOUT_ACCOUNT_NOT_VERIFIED', 'PAYOUT_PROVIDER_REFERENCE_REPLAY'].includes(message) ? 409
+            : 400;
+    return Response.json({ ok: false, error: message }, { status });
+  }
+}

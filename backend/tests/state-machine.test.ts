@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { SaleStatus } from '@prisma/client';
 import { canRequestSaleStatus, isAllowedSaleTransition } from '../lib/transfer-workflow';
 
 describe('Direct Sale canonical state machine', () => {
@@ -28,13 +29,13 @@ describe('Direct Sale canonical state machine', () => {
       ['PAYOUT_PENDING', 'PAYOUT_PROCESSING'],
       ['PAYOUT_PROCESSING', 'PAYOUT_CONFIRMED'],
       ['PAYOUT_CONFIRMED', 'COMPLETED'],
-    ] as const;
-    for (const [from, to] of path) expect(isAllowedSaleTransition(from as any, to as any)).toBe(true);
+    ] satisfies Array<[SaleStatus, SaleStatus]>;
+    for (const [from, to] of path) expect(isAllowedSaleTransition(from, to)).toBe(true);
   });
 
   it('rejects shortcut transitions', () => {
-    expect(isAllowedSaleTransition('PAYMENT_PENDING_VERIFICATION' as any, 'COMPLETED' as any)).toBe(false);
-    expect(isAllowedSaleTransition('HANDOVER_PENDING' as any, 'PAYOUT_CONFIRMED' as any)).toBe(false);
-    expect(isAllowedSaleTransition('BUYER_PENDING' as any, 'COMPLETED' as any)).toBe(false);
+    expect(isAllowedSaleTransition('PAYMENT_PENDING_VERIFICATION', 'COMPLETED')).toBe(false);
+    expect(isAllowedSaleTransition('HANDOVER_PENDING', 'PAYOUT_CONFIRMED')).toBe(false);
+    expect(isAllowedSaleTransition('BUYER_PENDING', 'COMPLETED')).toBe(false);
   });
 });

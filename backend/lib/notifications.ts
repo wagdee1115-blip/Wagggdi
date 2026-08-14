@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { db } from './db';
 
 export type NotificationPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'CRITICAL';
@@ -12,10 +13,10 @@ export class UnconfiguredSmsProvider {
 export class NotificationService {
   private smsProvider = new UnconfiguredSmsProvider();
 
-  async sendNotification(params: { userId:string; type:NotificationType; title:string; message:string; priority?:NotificationPriority; channels?:NotificationChannel[]; operationId?:string; data?:unknown; phone?:string }) {
+  async sendNotification(params: { userId:string; type:NotificationType; title:string; message:string; priority?:NotificationPriority; channels?:NotificationChannel[]; operationId?:string; data?:Prisma.InputJsonValue; phone?:string }) {
     const channels=params.channels??['IN_APP'];
     let notification=null;
-    if(channels.includes('IN_APP')) notification=await db.notification.create({data:{userId:params.userId,type:params.type,title:params.title,message:params.message,priority:params.priority??'NORMAL',operationId:params.operationId,data:params.data as any}});
+    if(channels.includes('IN_APP')) notification=await db.notification.create({data:{userId:params.userId,type:params.type,title:params.title,message:params.message,priority:params.priority??'NORMAL',operationId:params.operationId,data:params.data}});
     if(channels.includes('SMS')) { try { await this.smsProvider.sendSMS(); } catch(e) { if(!(e instanceof Error&&e.message.startsWith('NOT_CONFIGURED'))) console.error(e); } }
     return notification;
   }

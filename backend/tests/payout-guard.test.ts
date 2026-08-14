@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { db } from '../lib/db';
 import { createOwnershipTransfer } from '../lib/transfer-workflow';
 
+const dbIt = process.env.DATABASE_URL ? it : it.skip;
+
 // Every identifier is randomised rather than derived from Date.now().
 // User.phone, Vehicle.plateNumber, Vehicle.vin and VehicleAuthorization.authorizationNumber
 // are all @unique, and Vitest runs test files in parallel — timestamp-derived values
@@ -39,17 +41,17 @@ async function createPayoutAccount(userId: string, holderName: string, kind: Exc
  */
 async function seed(opts: { ownerPayout: PayoutKind; delegated?: boolean; agentPayout?: PayoutKind }) {
   const tag = uid();
-  const owner = await db.user.create({ data: { fullName: 'PG OWNER', phone: phone(), passwordHash: 'test', status: 'ACTIVE', phoneStatus: 'VERIFIED' } });
-  const buyer = await db.user.create({ data: { fullName: 'PG BUYER', phone: phone(), passwordHash: 'test', status: 'ACTIVE', phoneStatus: 'VERIFIED' } });
+  const owner = await db.user.create({ data: { fullName: 'PG OWNER', phone: phone(), nationalId: `PG-OWNER-${tag}`, passwordHash: 'test', status: 'ACTIVE', phoneStatus: 'VERIFIED', identityStatus: 'VERIFIED' } });
+  const buyer = await db.user.create({ data: { fullName: 'PG BUYER', phone: phone(), nationalId: `PG-BUYER-${tag}`, passwordHash: 'test', status: 'ACTIVE', phoneStatus: 'VERIFIED', identityStatus: 'VERIFIED' } });
   const agent = opts.delegated
-    ? await db.user.create({ data: { fullName: 'PG AGENT', phone: phone(), passwordHash: 'test', status: 'ACTIVE', phoneStatus: 'VERIFIED' } })
+    ? await db.user.create({ data: { fullName: 'PG AGENT', phone: phone(), nationalId: `PG-AGENT-${tag}`, passwordHash: 'test', status: 'ACTIVE', phoneStatus: 'VERIFIED', identityStatus: 'VERIFIED' } })
     : null;
 
   const payoutAccounts = [];
   if (opts.ownerPayout !== 'NONE') payoutAccounts.push(await createPayoutAccount(owner.id, owner.fullName, opts.ownerPayout));
   if (agent && opts.agentPayout && opts.agentPayout !== 'NONE') payoutAccounts.push(await createPayoutAccount(agent.id, agent.fullName, opts.agentPayout));
 
-  const vehicle = await db.vehicle.create({ data: { ownerId: owner.id, plateNumber: `PG-${tag}`, vin: `PG${tag}`.slice(0, 17), make: 'TEST', model: 'TEST', year: 2026, price: 1000000, mileage: 0, transmission: 'AUTO', fuelType: 'PETROL', color: 'WHITE', city: 'Sanaa', status: 'ACTIVE' } });
+  const vehicle = await db.vehicle.create({ data: { ownerId: owner.id, plateNumber: `PG-${tag}`, vin: `PG${tag}`.slice(0, 17), make: 'TEST', model: 'TEST', year: 2026, price: 1000000, mileage: 0, transmission: 'AUTO', fuelType: 'PETROL', color: 'WHITE', city: 'Sanaa', status: 'ACTIVE', governmentStatus: 'VERIFIED' } });
 
   const authorization = agent ? await db.vehicleAuthorization.create({ data: {
     authorizationNumber: `PG-AUTH-${tag}`,
@@ -94,8 +96,7 @@ async function expectNoSideEffects(ctx: Awaited<ReturnType<typeof seed>>) {
 }
 
 describe('Payout account guard on sale creation', () => {
-  it('rejects sale when seller has no payout account, without side effects', async () => {
-    if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt('rejects sale when seller has no payout account, without side effects', async () => {
     const ctx = await seed({ ownerPayout: 'NONE' });
     try {
       await expect(createOwnershipTransfer({ vehicleId: ctx.vehicle.id, sellerId: ctx.owner.id, buyerId: ctx.buyer.id, salePrice: 1000000 }))
@@ -106,8 +107,7 @@ describe('Payout account guard on sale creation', () => {
     }
   });
 
-  it('rejects sale when payout account exists but is not verified/matched', async () => {
-    if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt('rejects sale when payout account exists but is not verified/matched', async () => {
     const ctx = await seed({ ownerPayout: 'UNVERIFIED' });
     try {
       await expect(createOwnershipTransfer({ vehicleId: ctx.vehicle.id, sellerId: ctx.owner.id, buyerId: ctx.buyer.id, salePrice: 1000000 }))
@@ -118,8 +118,7 @@ describe('Payout account guard on sale creation', () => {
     }
   });
 
-  it('rejects sale with PAYOUT_REVIEW_REQUIRED when account is verified but name not matched', async () => {
-    if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt('rejects sale with PAYOUT_REVIEW_REQUIRED when account is verified but name not matched', async () => {
     const ctx = await seed({ ownerPayout: 'VERIFIED_NAME_MISMATCH' });
     try {
       await expect(createOwnershipTransfer({ vehicleId: ctx.vehicle.id, sellerId: ctx.owner.id, buyerId: ctx.buyer.id, salePrice: 1000000 }))
@@ -130,8 +129,7 @@ describe('Payout account guard on sale creation', () => {
     }
   });
 
-  it('allows sale when seller has a verified, name-matched payout account', async () => {
-    if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt('allows sale when seller has a verified, name-matched payout account', async () => {
     const ctx = await seed({ ownerPayout: 'VALID' });
     try {
       const sale = await createOwnershipTransfer({ vehicleId: ctx.vehicle.id, sellerId: ctx.owner.id, buyerId: ctx.buyer.id, salePrice: 1000000 });
@@ -147,8 +145,7 @@ describe('Payout account guard on sale creation', () => {
 });
 
 describe('Payout account guard under SELL_ONLY delegation', () => {
-  it('allows the sale when the vehicle owner holds the payout account, even though the delegated seller holds none', async () => {
-    if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt('allows the sale when the vehicle owner holds the payout account, even though the delegated seller holds none', async () => {
     const ctx = await seed({ ownerPayout: 'VALID', delegated: true, agentPayout: 'NONE' });
     const agent = ctx.agent!;
     try {
@@ -179,8 +176,7 @@ describe('Payout account guard under SELL_ONLY delegation', () => {
     }
   });
 
-  it("rejects the sale when the owner has no payout account, even if the delegated seller has a valid one", async () => {
-    if (!process.env.DATABASE_URL) throw new Error('BLOCKED:POSTGRESQL_REQUIRED');
+  dbIt("rejects the sale when the owner has no payout account, even if the delegated seller has a valid one", async () => {
     const ctx = await seed({ ownerPayout: 'NONE', delegated: true, agentPayout: 'VALID' });
     const agent = ctx.agent!;
     try {

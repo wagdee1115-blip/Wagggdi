@@ -1,3 +1,17 @@
 import { getCurrentUser } from '@/lib/api-auth';
 import { revokeAuthorization } from '@/lib/authorization';
-export async function POST(_:Request,{ params }: { params: Promise<{id:string}> }){try{const user=await getCurrentUser();if(!user)return Response.json({ok:false,error:'UNAUTHORIZED'},{status:401});const auth=await revokeAuthorization((await params).id,user.id);return Response.json({ok:true,authorization:auth});}catch(e){return Response.json({ok:false,error:e instanceof Error?e.message:'AUTHORIZATION_REVOKE_FAILED'},{status:400});}}
+import { authorizationErrorResponse, getAuthorizationView } from '../../authorization-view';
+
+export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  const user = await getCurrentUser();
+  if (!user) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+  try {
+    const id = (await params).id;
+    await revokeAuthorization(id, user.id);
+    const authorization = await getAuthorizationView(id, user.id);
+    if (!authorization) throw new Error('AUTHORIZATION_NOT_FOUND');
+    return Response.json({ ok: true, authorization }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    return authorizationErrorResponse(error, 'AUTHORIZATION_REVOKE_FAILED');
+  }
+}

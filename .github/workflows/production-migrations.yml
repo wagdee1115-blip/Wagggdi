@@ -71,18 +71,27 @@ jobs:
           set -euo pipefail
           BASELINE_STATE="$(node <<'NODE'
           const { PrismaClient } = require('@prisma/client');
+          const fs = require('fs');
+          const path = require('path');
           const db = new PrismaClient();
 
           const LEGACY_BASELINE = '20260812034147_initial';
           const CANONICAL_BASELINE = '20260812010041_init';
           const GOVERNMENT_REFERENCE = '20260812090000_unique_government_reference';
           const PASSWORD_RECOVERY = '20260812210000_password_reset_recovery_token';
-          const ALLOWED_MIGRATIONS = new Set([
-            LEGACY_BASELINE,
-            CANONICAL_BASELINE,
-            GOVERNMENT_REFERENCE,
-            PASSWORD_RECOVERY,
-          ]);
+          const migrationRoot = path.join(process.cwd(), 'prisma', 'migrations');
+          const repositoryMigrations = fs.readdirSync(migrationRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name)
+            .sort();
+          if (!repositoryMigrations.length || !repositoryMigrations.includes(CANONICAL_BASELINE)) {
+            throw new Error('REPOSITORY_MIGRATION_BASELINE_MISSING');
+          }
+          for (const name of repositoryMigrations) {
+            if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) throw new Error(`INVALID_REPOSITORY_MIGRATION_NAME:${name}`);
+            if (!fs.existsSync(path.join(migrationRoot, name, 'migration.sql'))) throw new Error(`MIGRATION_SQL_MISSING:${name}`);
+          }
+          const ALLOWED_MIGRATIONS = new Set([LEGACY_BASELINE, ...repositoryMigrations]);
 
           (async () => {
             const migrations = await db.$queryRawUnsafe(`
@@ -298,16 +307,21 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const { PrismaClient } = require('@prisma/client');
+          const fs = require('fs');
+          const path = require('path');
           const db = new PrismaClient();
 
           const LEGACY_BASELINE = '20260812034147_initial';
           const CANONICAL_BASELINE = '20260812010041_init';
-          const ALLOWED_MIGRATIONS = new Set([
-            LEGACY_BASELINE,
-            CANONICAL_BASELINE,
-            '20260812090000_unique_government_reference',
-            '20260812210000_password_reset_recovery_token',
-          ]);
+          const migrationRoot = path.join(process.cwd(), 'prisma', 'migrations');
+          const repositoryMigrations = fs.readdirSync(migrationRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name);
+          for (const name of repositoryMigrations) {
+            if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) throw new Error(`INVALID_REPOSITORY_MIGRATION_NAME:${name}`);
+            if (!fs.existsSync(path.join(migrationRoot, name, 'migration.sql'))) throw new Error(`MIGRATION_SQL_MISSING:${name}`);
+          }
+          const ALLOWED_MIGRATIONS = new Set([LEGACY_BASELINE, ...repositoryMigrations]);
 
           (async () => {
             await db.$transaction(async (tx) => {
@@ -355,14 +369,20 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const { PrismaClient } = require('@prisma/client');
+          const fs = require('fs');
+          const path = require('path');
           const db = new PrismaClient();
 
           const LEGACY_BASELINE = '20260812034147_initial';
-          const REPOSITORY_MIGRATIONS = new Set([
-            '20260812010041_init',
-            '20260812090000_unique_government_reference',
-            '20260812210000_password_reset_recovery_token',
-          ]);
+          const migrationRoot = path.join(process.cwd(), 'prisma', 'migrations');
+          const repositoryMigrationNames = fs.readdirSync(migrationRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name);
+          for (const name of repositoryMigrationNames) {
+            if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) throw new Error(`INVALID_REPOSITORY_MIGRATION_NAME:${name}`);
+            if (!fs.existsSync(path.join(migrationRoot, name, 'migration.sql'))) throw new Error(`MIGRATION_SQL_MISSING:${name}`);
+          }
+          const REPOSITORY_MIGRATIONS = new Set(repositoryMigrationNames);
 
           (async () => {
             const migrations = await db.$queryRawUnsafe(`
@@ -407,13 +427,19 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const { PrismaClient } = require('@prisma/client');
+          const fs = require('fs');
+          const path = require('path');
           const db = new PrismaClient();
 
-          const requiredMigrations = [
-            '20260812010041_init',
-            '20260812090000_unique_government_reference',
-            '20260812210000_password_reset_recovery_token',
-          ];
+          const migrationRoot = path.join(process.cwd(), 'prisma', 'migrations');
+          const requiredMigrations = fs.readdirSync(migrationRoot, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => entry.name)
+            .sort();
+          for (const name of requiredMigrations) {
+            if (!/^\d{14}_[A-Za-z0-9_]+$/.test(name)) throw new Error(`INVALID_REPOSITORY_MIGRATION_NAME:${name}`);
+            if (!fs.existsSync(path.join(migrationRoot, name, 'migration.sql'))) throw new Error(`MIGRATION_SQL_MISSING:${name}`);
+          }
           const expected = new Set(requiredMigrations);
 
           (async () => {

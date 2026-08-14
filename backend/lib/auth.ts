@@ -17,12 +17,20 @@ export async function verifyPassword(password: string, hash: string) {
   return bcrypt.compare(password, hash);
 }
 
-export async function signJwt(payload: Record<string, unknown>) {
+async function signJwt(payload: Record<string, unknown>) {
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt()
     .setExpirationTime('30m')
     .sign(getSecret());
+}
+
+export async function signAuthenticatedJwt(payload: Record<string, unknown>) {
+  return signJwt({ ...payload, purpose: undefined, sessionType: 'AUTHENTICATED' });
+}
+
+export async function signRegistrationJwt(payload: Record<string, unknown>) {
+  return signJwt({ ...payload, purpose: undefined, sessionType: 'REGISTRATION' });
 }
 
 export async function verifyJwt(token: string) {
@@ -35,7 +43,7 @@ export async function verifyJwt(token: string) {
 }
 
 export async function signSensitiveJwt(payload: Record<string, unknown>) {
-  return new jose.SignJWT({ ...payload, sessionType: 'SENSITIVE' })
+  return new jose.SignJWT({ ...payload, purpose: undefined, sessionType: 'SENSITIVE' })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt()
     .setExpirationTime('2m')
@@ -43,7 +51,7 @@ export async function signSensitiveJwt(payload: Record<string, unknown>) {
 }
 
 export async function signPasswordResetJwt(payload: Record<string, unknown>) {
-  return new jose.SignJWT({ ...payload, purpose: 'PASSWORD_RESET' })
+  return new jose.SignJWT({ ...payload, sessionType: undefined, purpose: 'PASSWORD_RESET' })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt()
     .setExpirationTime('5m')

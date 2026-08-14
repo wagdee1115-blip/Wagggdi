@@ -1,0 +1,26 @@
+import { z } from 'zod';
+import { getCurrentUser } from '@/lib/api-auth';
+import { phoneChangeError, resendPhoneChangeOtp } from '@/lib/phone-change';
+import { consumeCompositeRateLimit } from '@/lib/rate-limit';
+import { getTrustedClientIp, rateLimitTarget } from '@/lib/request-identity';
+
+const schema = z.object({ requestId: z.string().uuid() });
+
+export async function POST(req: Request) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+    const parsed = schema.safeParse(await req.json());
+    if (!parsed.success) return Response.json({ ok: false, error: 'INVALID_INPUT' }, { status: 400 });
+    const deviceId = req.headers.get('x-device-id')?.trim() || undefined;
+    await consumeCompositeRateLimit({
+      scope: 'phone-change-resend', limit: 5, windowMs: 60 * 60 * 1000, userId: user.id,
+      ip: getTrustedClientIp(req), deviceId: deviceId ? rateLimitTarget(deviceId) : undefined,
+    });
+    const request = await resendPhoneChangeOtp({ userId: user.id, requestId: parsed.data.requestId });
+    return Response.json({ ok: true, request }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    const result = phoneChangeError(error);
+    return Response.json({ ok: false, error: result.code }, { status: result.status, headers: { 'Cache-Control': 'no-store' } });
+  }
+}

@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type LedgerEntryType } from '@prisma/client';
 import { db } from './db';
 
 type DbClient = Prisma.TransactionClient | typeof db;
@@ -13,7 +13,7 @@ type DoubleEntryResult = { replayed: boolean; entries: LedgerEntry[] };
 
 export async function createDoubleEntry(params: {
   transactionId: string; entryGroupId: string; amount: Prisma.Decimal | number | string; currency: string;
-  debitType: string; creditType: string; userId?: string; relatedOperationId?: string; providerRef?: string;
+  debitType: LedgerEntryType; creditType: LedgerEntryType; userId?: string; relatedOperationId?: string; providerRef?: string;
   idempotencyKey: string; metadata?: Prisma.InputJsonValue;
 }, client: DbClient = db): Promise<DoubleEntryResult> {
   if (client === db) return db.$transaction((tx): Promise<DoubleEntryResult> => createDoubleEntry(params, tx));
@@ -43,10 +43,10 @@ export async function createDoubleEntry(params: {
   };
 
   const debit = await client.financialLedger.create({
-    data: { ...base, entryType: params.debitType as any, direction: 'DEBIT', idempotencyKey: `${params.idempotencyKey}:D` },
+    data: { ...base, entryType: params.debitType, direction: 'DEBIT', idempotencyKey: `${params.idempotencyKey}:D` },
   });
   const credit = await client.financialLedger.create({
-    data: { ...base, entryType: params.creditType as any, direction: 'CREDIT', idempotencyKey: `${params.idempotencyKey}:C` },
+    data: { ...base, entryType: params.creditType, direction: 'CREDIT', idempotencyKey: `${params.idempotencyKey}:C` },
   });
 
   const result = { replayed: false, entries: [debit, credit] };

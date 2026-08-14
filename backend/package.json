@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build && node scripts/verify-css-output.mjs",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:watch": "vitest",
     "db:generate": "prisma generate",
@@ -15,7 +15,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
     "postinstall": "prisma generate",
-    "ci:verify": "prisma generate && prisma migrate deploy && npm run typecheck && npm test && npm run build"
+    "ci:verify": "prisma generate && prisma migrate deploy && npm run typecheck && npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@prisma/client": "5.22.0",
@@ -36,6 +36,8 @@
     "@types/node": "^20.12.12",
     "@types/react": "19.2.18",
     "autoprefixer": "^10.4.19",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.3.1",
     "postcss": "^8.4.38",
     "prisma": "5.22.0",
     "tailwindcss": "^3.4.4",

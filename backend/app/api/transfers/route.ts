@@ -1,8 +1,7 @@
-import { getCurrentUser } from '@/lib/api-auth';
+import { apiError, getCurrentUser } from '@/lib/api-auth';
 import { createOwnershipTransfer } from '@/lib/transfer-workflow';
 import { db } from '@/lib/db';
 import { z } from 'zod';
-import { notificationService } from '@/lib/notifications';
 
 const schema = z.object({
   vehicleId: z.string().min(1),
@@ -32,10 +31,9 @@ export async function GET() {
         status: true,
         sellerId: true,
         sellerName: true,
-        sellerPhone: true,
         buyerId: true,
         buyerName: true,
-        buyerPhone: true,
+        payoutUserId: true,
         vehicleAmountYER: true,
         platformFeeUSD: true,
         platformFeeYER: true,
@@ -52,10 +50,13 @@ export async function GET() {
         },
       },
     });
-    return Response.json({ ok: true, userId: u.id, sales });
+    const safeSales = sales.map(({ sellerId, buyerId, payoutUserId, ...sale }) => ({
+      ...sale,
+      party: buyerId === u.id ? 'BUYER' : sellerId === u.id ? 'SELLER' : payoutUserId === u.id ? 'PAYOUT_OWNER' : 'STAFF',
+    }));
+    return Response.json({ ok: true, sales: safeSales }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'TRANSFER_LIST_FAILED';
-    return Response.json({ ok: false, error: msg }, { status: 500 });
+    return apiError(e);
   }
 }
 
@@ -78,10 +79,8 @@ export async function POST(req: Request) {
       soldThroughExhibitionService: p.data.soldThroughExhibitionService,
       auctionId: undefined,
     });
-    await notificationService.sendNotification({ userId: buyer.id, type: 'TRANSFER_REQUEST', title: 'لديك طلب بيع مركبة', message: `لديك طلب شراء مركبة رقم العملية ${sale.id}`, priority: 'HIGH', channels: ['IN_APP'], operationId: sale.id });
-    return Response.json({ ok: true, sale, buyer: { id: buyer.id, fullName: buyer.fullName, phoneMasked: `${buyer.phone.slice(0, 3)}***${buyer.phone.slice(-3)}` } }, { status: 201 });
+    return Response.json({ ok: true, sale: { id: sale.id, status: sale.status, expiresAt: sale.expiresAt }, nextAction: 'SELLER_OTP_REQUIRED', buyer: { fullName: buyer.fullName, phoneMasked: `${buyer.phone.slice(0, 3)}***${buyer.phone.slice(-3)}` } }, { status: 201 });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'TRANSFER_CREATE_FAILED';
-    return Response.json({ ok: false, error: msg }, { status: msg.startsWith('NOT_CONFIGURED') ? 503 : 400 });
+    return apiError(e);
   }
 }

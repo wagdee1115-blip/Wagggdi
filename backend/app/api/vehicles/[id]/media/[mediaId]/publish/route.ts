@@ -1,3 +1,30 @@
-import { getCurrentUser } from '@/lib/api-auth';
+import { getCurrentUser, safeApiErrorCode } from '@/lib/api-auth';
 import { redactPlateBeforePublic } from '@/lib/plate-redaction';
-export async function POST(_:Request,{ params }: { params: Promise<{id:string;mediaId:string}> }){try{const u=await getCurrentUser();if(!u)return Response.json({ok:false,error:'UNAUTHORIZED'},{status:401});const media=await redactPlateBeforePublic((await params).mediaId,u.id);return Response.json({ok:true,media});}catch(e){const m=e instanceof Error?e.message:'MEDIA_PUBLISH_FAILED';return Response.json({ok:false,error:m},{status:m.startsWith('NOT_CONFIGURED')?503:400});}}
+import { consumeCompositeRateLimit } from '@/lib/rate-limit';
+import { getTrustedClientIp } from '@/lib/request-identity';
+
+export async function POST(req: Request, { params }: { params: Promise<{ id: string; mediaId: string }> }) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
+    await consumeCompositeRateLimit({
+      scope: 'vehicle-media-publish', limit: 30, windowMs: 60 * 60 * 1_000,
+      userId: user.id, ip: getTrustedClientIp(req),
+    });
+    const { id, mediaId } = await params;
+    const media = await redactPlateBeforePublic(mediaId, user.id, id);
+    return Response.json({
+      ok: true,
+      media: {
+        id: media.id,
+        mediaType: media.mediaType,
+        publicStatus: media.publicStatus,
+        plateDetectionStatus: media.plateDetectionStatus,
+      },
+    });
+  } catch (error) {
+    const code = safeApiErrorCode(error);
+    const status = code === 'RATE_LIMITED' ? 429 : code.startsWith('NOT_CONFIGURED') ? 503 : 400;
+    return Response.json({ ok: false, error: code }, { status });
+  }
+}
