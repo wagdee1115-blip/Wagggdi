@@ -1,0 +1,68 @@
+name: Next Security Upgrade Trial
+
+on:
+  push:
+    branches:
+      - markabat-v4-wave1-next-security-trial
+
+permissions:
+  contents: read
+
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: markabat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d markabat_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/markabat_test
+      NODE_ENV: test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+      - name: Pin npm
+        run: |
+          npm install -g npm@10.9.2
+          test "$(npm --version)" = "10.9.2"
+      - name: Install baseline
+        run: npm ci --no-audit --no-fund
+      - name: Show candidate metadata
+        run: |
+          npm view next@15.5.21 version peerDependencies engines
+          npm view react@19 version --json
+          npm view postcss version
+      - name: Apply candidate upgrade in runner only
+        run: npm install --save-exact next@15.5.21 react@19 react-dom@19 @types/react@19 @types/react-dom@19 --no-audit --no-fund
+      - name: Audit production dependencies
+        run: |
+          npm audit --omit=dev --json > /tmp/audit.json || true
+          node -e "const a=require('/tmp/audit.json'); console.log('AUDIT_COUNTS',JSON.stringify(a.metadata?.vulnerabilities||{})); for(const [n,v] of Object.entries(a.vulnerabilities||{})) if(['high','critical'].includes(v.severity)) console.log('AUDIT_HIGH',n,v.severity,JSON.stringify(v.fixAvailable));"
+      - name: Prisma validate and migrate
+        run: |
+          npx prisma validate
+          npx prisma generate
+          npx prisma migrate deploy
+          npx prisma migrate status
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Full tests
+        run: npm test
+      - name: Build
+        run: npm run build
