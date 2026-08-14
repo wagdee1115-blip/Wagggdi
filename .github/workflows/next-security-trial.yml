@@ -43,13 +43,23 @@ jobs:
           test "$(npm --version)" = "10.9.2"
       - name: Install baseline
         run: npm ci --no-audit --no-fund
-      - name: Show candidate metadata
+      - name: Prepare async request API compatibility in runner only
         run: |
-          npm view next@15.5.21 version peerDependencies engines
-          npm view react@19 version --json
-          npm view postcss version
-      - name: Apply candidate upgrade in runner only
-        run: npm install --save-exact next@15.5.21 react@19 react-dom@19 @types/react@19 @types/react-dom@19 --no-audit --no-fund
+          python3 - <<'PY'
+          from pathlib import Path
+          touched=[]
+          for p in Path('.').rglob('*.ts'):
+              if 'node_modules' in p.parts or '.next' in p.parts:
+                  continue
+              s=p.read_text()
+              if 'cookies().' in s:
+                  n=s.replace('cookies().', '(await cookies()).')
+                  p.write_text(n)
+                  touched.append(str(p))
+          print('ASYNC_COOKIE_PATCHES', *touched, sep='\n')
+          PY
+      - name: Apply Next 16 candidate in runner only
+        run: npm install --save-exact next@16.3.1 react@19.2.8 react-dom@19.2.8 @types/react@19 @types/react-dom@19 --no-audit --no-fund
       - name: Audit production dependencies
         run: |
           npm audit --omit=dev --json > /tmp/audit.json || true
