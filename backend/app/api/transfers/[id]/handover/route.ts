@@ -12,14 +12,14 @@ const schema = z.object({
   qrValue: z.string().min(1), mileage: z.number().int().nonnegative(), photos: z.any().optional(), notes: z.string().max(2000).optional(),
 });
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const u = await getCurrentUser();
     if (!u) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
     await consumeRateLimit(`handover:user:${u.id}`, 10, 60_000);
     const p = schema.safeParse(await req.json());
     if (!p.success) return Response.json({ ok: false, error: 'INVALID_INPUT' }, { status: 400 });
-    const sale = await db.vehicleSale.findUnique({ where: { id: params.id } });
+    const sale = await db.vehicleSale.findUnique({ where: { id: (await params).id } });
     if (!sale || !sale.buyerId) return Response.json({ ok: false, error: 'SALE_NOT_FOUND' }, { status: 404 });
     if (![sale.buyerId, sale.sellerId, sale.payoutUserId].includes(u.id)) return Response.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 });
 

@@ -7,14 +7,14 @@ import { consumeCompositeRateLimit } from '@/lib/rate-limit';
 
 const schema = z.object({ amount: z.number().positive() });
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const bids = await db.auctionBid.findMany({ where: { auctionId: params.id }, orderBy: [{ amount: 'desc' }, { createdAt: 'asc' }], include: { bidder: { select: { id: true, fullName: true } } }, take: 100 });
+    const bids = await db.auctionBid.findMany({ where: { auctionId: (await params).id }, orderBy: [{ amount: 'desc' }, { createdAt: 'asc' }], include: { bidder: { select: { id: true, fullName: true } } }, take: 100 });
     return Response.json({ ok: true, bids });
   } catch (e) { return apiError(e); }
 }
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser();
     if (!user || user.status !== 'ACTIVE') return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
@@ -25,7 +25,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) return Response.json({ ok: false, error: 'INVALID_INPUT' }, { status: 400 });
 
-    const result = await placeAuctionBid({ auctionId: params.id, bidderId: user.id, amount: parsed.data.amount, idempotencyKey });
+    const result = await placeAuctionBid({ auctionId: (await params).id, bidderId: user.id, amount: parsed.data.amount, idempotencyKey });
     if (!result.replayed) {
       const auction = result.auction;
       if (auction) {

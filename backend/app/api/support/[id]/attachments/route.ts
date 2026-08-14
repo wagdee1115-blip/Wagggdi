@@ -9,12 +9,12 @@ const signatures: Record<string, number[]> = {
   'image/jpeg': [0xff, 0xd8, 0xff], 'image/png': [0x89, 0x50, 0x4e, 0x47], 'image/webp': [0x52, 0x49, 0x46, 0x46], 'application/pdf': [0x25, 0x50, 0x44, 0x46],
 };
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const u = await getCurrentUser();
     if (!u) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
     await consumeCompositeRateLimit({ scope: 'support-upload', limit: 20, windowMs: 60 * 60 * 1000, userId: u.id, ip: req.headers.get('x-real-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? undefined, deviceId: req.headers.get('x-device-id') ?? undefined });
-    const ticket = await db.supportTicket.findFirst({ where: { id: params.id, userId: u.id } });
+    const ticket = await db.supportTicket.findFirst({ where: { id: (await params).id, userId: u.id } });
     if (!ticket) return Response.json({ ok: false, error: 'TICKET_NOT_FOUND' }, { status: 404 });
     const storageUrl = process.env.SUPPORT_STORAGE_URL;
     const storageSecret = process.env.SUPPORT_STORAGE_SECRET;

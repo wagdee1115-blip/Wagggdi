@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   if (!req.nextUrl.pathname.startsWith('/api/')) return NextResponse.next();
   if (['GET','HEAD','OPTIONS'].includes(req.method)) return NextResponse.next();
   if (req.nextUrl.pathname.startsWith('/api/payments/webhook') || req.nextUrl.pathname.startsWith('/api/cron/') || req.nextUrl.pathname.startsWith('/api/transfers/') && req.nextUrl.pathname.endsWith('/ownership-transfer')) return NextResponse.next();

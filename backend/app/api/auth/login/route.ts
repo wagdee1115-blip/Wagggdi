@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     if (!u || !(await verifyPassword(p.data.password, u.passwordHash))) return Response.json({ ok: false, error: 'INVALID_CREDENTIALS' }, { status: 401 });
     if (u.status !== 'ACTIVE') return Response.json({ ok: false, error: 'ACCOUNT_UNAVAILABLE' }, { status: 403 });
     const token = await signJwt({ sub: u.id, role: u.role, sessionVersion: u.sessionVersion });
-    cookies().set('markabat_session', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 30 * 60 });
+    (await cookies()).set('markabat_session', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 30 * 60 });
     return Response.json({ ok: true, user: { id: u.id, fullName: u.fullName, role: u.role, status: u.status, identityStatus: u.identityStatus, phoneStatus: u.phoneStatus } });
   } catch (e) {
     if (e instanceof Error && e.message === 'RATE_LIMITED') return Response.json({ ok: false, error: 'RATE_LIMITED' }, { status: 429 });

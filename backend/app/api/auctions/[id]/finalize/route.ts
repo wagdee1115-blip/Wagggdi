@@ -1,10 +1,10 @@
 import { getCurrentUser } from '@/lib/api-auth';
 import { finalizeAuction, settleLosingBidDeposits } from '@/lib/auction';
-export async function POST(_: Request, { params }: { params: { id: string } }) {
+export async function POST(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await getCurrentUser();
     if (!user || !['OWNER', 'SUPER_ADMIN', 'ADMIN'].includes(user.role)) return Response.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 });
-    const auction = await finalizeAuction(params.id);
+    const auction = await finalizeAuction((await params).id);
     let depositSettlement: unknown = null;
     if (auction.status === 'SOLD' || auction.status === 'ENDED') {
       try { depositSettlement = await settleLosingBidDeposits(auction.id, auction.winnerId ?? undefined); }

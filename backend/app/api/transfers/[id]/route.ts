@@ -10,18 +10,18 @@ const ALLOWED = new Set<SaleStatus>([
   'CANCELLED', 'EXPIRED', 'DISPUTED', 'MANUAL_REVIEW', 'PAYOUT_REVIEW_REQUIRED',
 ]);
 
-export async function GET(_: Request, { params }: { params: { id: string } }) {
+export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const u = await getCurrentUser();
     if (!u) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
-    const sale = await db.vehicleSale.findUnique({ where: { id: params.id }, include: { vehicle: true, payments: true, receipts: true, contract: true, auditLogs: true } });
+    const sale = await db.vehicleSale.findUnique({ where: { id: (await params).id }, include: { vehicle: true, payments: true, receipts: true, contract: true, auditLogs: true } });
     if (!sale) return Response.json({ ok: false, error: 'SALE_NOT_FOUND' }, { status: 404 });
     if (sale.sellerId !== u.id && sale.payoutUserId !== u.id && sale.buyerId !== u.id && !['ADMIN', 'SUPER_ADMIN', 'OWNER', 'SUPPORT'].includes(u.role)) return Response.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 });
     return Response.json({ ok: true, sale });
   } catch (e) { return apiError(e); }
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const u = await getCurrentUser();
     if (!u) return Response.json({ ok: false, error: 'UNAUTHORIZED' }, { status: 401 });
@@ -29,10 +29,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const requested = String(body.status) as SaleStatus;
     if (!ALLOWED.has(requested)) return Response.json({ ok: false, error: 'INVALID_STATUS' }, { status: 400 });
     if (!canRequestSaleStatus(u.role, requested)) return Response.json({ ok: false, error: 'PROVIDER_MANAGED_STATUS' }, { status: 403 });
-    const sale = await db.vehicleSale.findUnique({ where: { id: params.id } });
+    const sale = await db.vehicleSale.findUnique({ where: { id: (await params).id } });
     if (!sale) return Response.json({ ok: false, error: 'SALE_NOT_FOUND' }, { status: 404 });
     if (sale.sellerId !== u.id && sale.payoutUserId !== u.id && sale.buyerId !== u.id && !['ADMIN', 'SUPER_ADMIN', 'OWNER', 'FINANCE', 'VERIFIER'].includes(u.role)) return Response.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 });
-    const updated = await advanceSaleStatus(params.id, requested, u.id, body.metadata);
+    const updated = await advanceSaleStatus((await params).id, requested, u.id, body.metadata);
     return Response.json({ ok: true, sale: updated });
   } catch (e) { return apiError(e); }
 }

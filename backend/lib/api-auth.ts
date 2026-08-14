@@ -13,7 +13,7 @@ export function isOnboardingAccount(user: { status: string; role: string } | nul
 
 /** Session lookup for the few flows that must remain available after suspension (currently logout only). */
 export async function getSessionUser() {
-  const token = cookies().get('markabat_session')?.value;
+  const token = (await cookies()).get('markabat_session')?.value;
   if (!token) return null;
   const payload = await verifyJwt(token);
   if (!payload?.sub) return null;
@@ -31,7 +31,7 @@ export async function getCurrentUser() {
 
 /** Restricted registration-session boundary used only by phone onboarding. */
 export async function getOnboardingUser() {
-  const token = cookies().get('markabat_session')?.value;
+  const token = (await cookies()).get('markabat_session')?.value;
   if (!token) return null;
   const payload = await verifyJwt(token);
   if (!payload?.sub || payload.sessionType !== 'REGISTRATION' || payload.role !== 'USER') return null;
@@ -64,7 +64,7 @@ export function apiError(error: unknown) {
 }
 
 export async function getSensitiveUser() {
-  const token = cookies().get('markabat_sensitive_session')?.value;
+  const token = (await cookies()).get('markabat_sensitive_session')?.value;
   if (!token) return null;
   const payload = await verifyJwt(token);
   if (!payload?.sub || payload.sessionType !== 'SENSITIVE') return null;

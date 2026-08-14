@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { confirmOwnershipTransfer } from '@/lib/transfer-workflow';
 import { notificationService } from '@/lib/notifications';
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const secret = process.env.TRAFFIC_PROVIDER_WEBHOOK_SECRET;
     if (!secret) return Response.json({ ok: false, error: 'NOT_CONFIGURED:TRAFFIC_PROVIDER_REQUIRED' }, { status: 503 });
@@ -14,7 +14,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!valid) return Response.json({ ok: false, error: 'INVALID_SIGNATURE' }, { status: 401 });
     const body = JSON.parse(raw) as { providerReference?: string };
     if (!body.providerReference) return Response.json({ ok: false, error: 'PROVIDER_REFERENCE_REQUIRED' }, { status: 400 });
-    const sale = await confirmOwnershipTransfer(params.id, body.providerReference);
+    const sale = await confirmOwnershipTransfer((await params).id, body.providerReference);
     if (sale.buyerId) await notificationService.sendNotification({ userId: sale.buyerId, type: 'OWNERSHIP_TRANSFERRED', title: 'تم نقل الملكية', message: `تم نقل ملكية المركبة للعملية ${sale.id}.`, priority: 'CRITICAL', channels: ['IN_APP'], operationId: sale.id });
     return Response.json({ ok: true, sale });
   } catch (e) {
