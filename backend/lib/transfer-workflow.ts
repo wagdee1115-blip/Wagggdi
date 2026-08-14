@@ -253,7 +253,7 @@ export async function confirmEscrowHeld(params: { saleId: string; escrowProvider
     if (!sale || !sale.buyerId) throw new Error('SALE_NOT_FOUND');
     if (!new Prisma.Decimal(params.amountYER).eq(sale.totalPaidYER)) throw new Error('ESCROW_AMOUNT_MISMATCH');
     const payment = await tx.paymentTransaction.findUnique({ where: { providerReference: params.paymentProviderReference } });
-    if (!payment || payment.vehicleSaleId !== sale.id || payment.userId !== sale.buyerId || !payment.amount.eq(sale.totalPaidYER) || payment.currency !== params.currency) throw new Error('ESCROW_PAYMENT_MISMATCH');
+    if (!payment || payment.status !== 'SUCCESS' || payment.vehicleSaleId !== sale.id || payment.userId !== sale.buyerId || !payment.amount.eq(sale.totalPaidYER) || payment.currency !== params.currency) throw new Error('ESCROW_PAYMENT_MISMATCH');
     if (sale.fundsSecured || sale.status === 'ESCROW_HELD') {
       if (sale.escrowTransactionId !== params.escrowProviderReference) throw new Error('ESCROW_PROVIDER_REFERENCE_MISMATCH');
       return sale;

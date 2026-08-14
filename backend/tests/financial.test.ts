@@ -35,6 +35,10 @@ describe('Financial integrity', () => {
       expect(first.fundsSecured).toBe(false);
       expect(await db.financialLedger.count({ where: { transactionId: sale.id } })).toBe(0);
 
+      await db.paymentTransaction.update({ where: { vehicleSaleId: sale.id }, data: { status: 'FAILED' } });
+      await expect(confirmEscrowHeld({ saleId: sale.id, escrowProviderReference: `ESCROW-FAILED-PAYMENT-${suffix}`, paymentProviderReference: providerReference, amountYER: totalPaidYER, currency: 'YER' })).rejects.toThrow('ESCROW_PAYMENT_MISMATCH');
+      await db.paymentTransaction.update({ where: { vehicleSaleId: sale.id }, data: { status: 'SUCCESS' } });
+
       const otherSale = await db.vehicleSale.create({ data: { vehicleId: vehicle.id, sellerId: seller.id, sellerName: seller.fullName, sellerNationalId: '', sellerPhone: seller.phone, sellerVerified: true, payoutUserId: seller.id, buyerId: buyer.id, buyerName: buyer.fullName, buyerNationalId: '', buyerPhone: buyer.phone, buyerVerified: true, buyerApproved: true, buyerOtpVerified: true, vehicleAmountYER: 1000000, platformFeeUSD: 20, platformFeeYER, transferFeeUSD: 80, transferFeeYER, listingCommissionUSD: 0, auctionFeeYER: 0, governmentFeesYER: 0, totalPaidYER, sellerPayoutYER: 1000000, platformRevenueYER: platformFeeYER.add(transferFeeYER), exchangeRate: 535, exchangeRateId: rate.id, status: 'BUYER_ACCEPTED', expiresAt: new Date(Date.now()+2*60*60*1000) } });
       const otherPaymentReference = `PROVIDER-OTHER-SALE-${suffix}`;
       await confirmSalePayment(otherSale.id, otherPaymentReference, `IDEMP-OTHER-SALE-${suffix}`, totalPaidYER);
