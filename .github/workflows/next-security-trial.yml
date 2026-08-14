@@ -1,4 +1,4 @@
-name: Apply Verified Next 16 Security Upgrade to Wave 1
+name: Export Verified MARKABAT V4 Source Snapshot
 
 on:
   push:
@@ -6,141 +6,43 @@ on:
       - markabat-v4-wave1-next-security-trial
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  export:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: markabat_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d markabat_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/markabat_test
-      NODE_ENV: test
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact verified source
+        uses: actions/checkout@v4
         with:
-          ref: markabat-v4-phase2-wave1-fix
-          fetch-depth: 0
+          ref: f643d5539a4e0a356bb1cff5786ad3d52213386b
+          fetch-depth: 1
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.20.0'
-
-      - name: Assert exact approved Wave 1 head
-        run: test "$(git rev-parse HEAD)" = "a79463afb1971904fd49510e9686d4a8093eb474"
-
-      - name: Install baseline
-        working-directory: backend
+      - name: Verify and stage exact tracked snapshot
         run: |
-          npm install -g npm@10.9.2
-          test "$(npm --version)" = "10.9.2"
-          npm ci --no-audit --no-fund
-
-      - name: Apply verified Next 16 source compatibility
-        working-directory: backend
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import json, re
-          cookies=[]; params=[]
-          for p in Path('.').rglob('*.ts'):
-              if 'node_modules' in p.parts or '.next' in p.parts: continue
-              s=p.read_text(); n=s
-              if 'cookies().' in n:
-                  n=n.replace('cookies().', '(await cookies()).'); cookies.append(str(p))
-              if 'app' in p.parts and 'api' in p.parts and p.name == 'route.ts':
-                  n2,c=re.subn(r'\{\s*params\s*\}\s*:\s*\{\s*params\s*:\s*\{([^{}]+)\}\s*\}',lambda m:'{ params }: { params: Promise<{'+m.group(1)+'}> }',n)
-                  if c:
-                      n=re.sub(r'\bparams\.', '(await params).', n2); params.append(str(p))
-              if n != s: p.write_text(n)
-          if len(cookies) != 5: raise SystemExit(f'COOKIE_MIGRATION_COUNT:{len(cookies)}')
-          if len(params) != 26: raise SystemExit(f'PARAM_MIGRATION_COUNT:{len(params)}')
-
-          middleware=Path('middleware.ts'); proxy=Path('proxy.ts')
-          if not middleware.exists() or proxy.exists(): raise SystemExit('MIDDLEWARE_BASELINE_MISMATCH')
-          m=middleware.read_text()
-          if m.count('export function middleware') != 1: raise SystemExit('MIDDLEWARE_EXPORT_MISMATCH')
-          proxy.write_text(m.replace('export function middleware','export function proxy',1)); middleware.unlink()
-
-          ts=Path('tsconfig.json'); data=json.loads(ts.read_text())
-          data['compilerOptions']['jsx']='react-jsx'
-          inc=data.setdefault('include',[])
-          if '.next/dev/types/**/*.ts' not in inc: inc.insert(2,'.next/dev/types/**/*.ts')
-          ts.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
-          print('MIGRATED_COOKIES',len(cookies)); print('MIGRATED_DYNAMIC_ROUTES',len(params))
-          PY
-
-          cat > scripts/verify-css-output.mjs <<'EOF'
-          import { readdir, readFile, stat } from 'node:fs/promises';
-          import path from 'node:path';
-          const staticDir = path.resolve(process.cwd(), '.next', 'static');
-          function fail(message) { console.error(`CSS_BUILD_GATE_FAILED: ${message}`); process.exit(1); }
-          const cssFiles = [];
-          async function walk(dir) {
-            let entries;
-            try { entries = await readdir(dir, { withFileTypes: true }); }
-            catch (error) { fail(`missing ${dir}: ${error instanceof Error ? error.message : String(error)}`); }
-            for (const entry of entries) {
-              const full = path.join(dir, entry.name);
-              if (entry.isDirectory()) await walk(full);
-              else if (entry.isFile() && entry.name.endsWith('.css')) cssFiles.push(full);
-            }
-          }
-          await walk(staticDir);
-          if (!cssFiles.length) fail('no compiled CSS files were emitted by Next.js');
-          let totalBytes=0, compiledCss='';
-          for (const file of cssFiles) { const s=await stat(file); totalBytes+=s.size; compiledCss+=`\n${await readFile(file,'utf8')}`; }
-          if (totalBytes < 2000) fail(`compiled CSS is unexpectedly small (${totalBytes} bytes)`);
-          const required=['.min-h-screen','.grid-cols-2','.rounded-3xl','.bg-slate-50','.text-primary-900'];
-          const missing=required.filter(x=>!compiledCss.includes(x));
-          if (missing.length) fail(`Tailwind utilities missing from compiled CSS: ${missing.join(', ')}`);
-          console.log(`CSS_BUILD_GATE_PASS: ${cssFiles.length} CSS file(s), ${totalBytes} bytes, Tailwind utilities verified.`);
+          test "$(git rev-parse HEAD)" = "f643d5539a4e0a356bb1cff5786ad3d52213386b"
+          mkdir -p /tmp/markabat-export
+          git archive HEAD | tar -x -C /tmp/markabat-export
+          cat > /tmp/markabat-export/SOURCE-SNAPSHOT-METADATA.txt <<'EOF'
+          MARKABAT V4 — VERIFIED SOURCE SNAPSHOT
+          Source branch: markabat-v4-phase2-wave1-fix
+          Source commit: f643d5539a4e0a356bb1cff5786ad3d52213386b
+          Base main commit: e4a89d7ed1fbc15454831861450ae062db0ed7f1
+          Export date: 2026-08-14
+          App root: backend/
+          This archive contains tracked repository files at the verified source commit.
+          No .git directory, runtime secrets, node_modules, .next build cache, or production database data are included.
           EOF
+          echo "TRACKED_FILES=$(git ls-files | wc -l)"
+          du -sh /tmp/markabat-export
 
-      - name: Upgrade framework dependencies
-        working-directory: backend
-        run: npm install --save-exact next@16.3.1 react@19.2.8 react-dom@19.2.8 @types/react@19 @types/react-dom@19 --no-audit --no-fund
-
-      - name: Audit gate
-        working-directory: backend
-        run: |
-          npm audit --omit=dev --json > /tmp/audit.json || true
-          node -e "const a=require('/tmp/audit.json'); const v=a.metadata?.vulnerabilities||{}; console.log('AUDIT_COUNTS',JSON.stringify(v)); if((v.high||0)>0||(v.critical||0)>0) process.exit(1)"
-
-      - name: Prisma gates
-        working-directory: backend
-        run: |
-          npx prisma validate
-          npx prisma generate
-          npx prisma migrate deploy
-          npx prisma migrate status
-
-      - name: Typecheck tests build
-        working-directory: backend
-        run: |
-          npm run typecheck
-          npm test
-          npm run build
-
-      - name: Commit and push Wave 1 security upgrade
-        run: |
-          git diff --check
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A backend
-          git diff --cached --check
-          git commit -m 'security: upgrade Wave 1 to Next 16.3.1 [verified]'
-          git push origin HEAD:markabat-v4-phase2-wave1-fix
+      - name: Upload complete source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: MARKABAT-V4-FULL-SOURCE-f643d553
+          path: /tmp/markabat-export/
+          include-hidden-files: true
+          compression-level: 9
+          if-no-files-found: error
+          retention-days: 7
