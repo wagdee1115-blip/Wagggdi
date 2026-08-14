@@ -55,6 +55,7 @@ describe('Financial integrity', () => {
       const platformGroup = `FEE:PLATFORM:${sale.id}`;
       const platformEntries = await db.financialLedger.findMany({ where: { entryGroupId: platformGroup }, orderBy: { direction: 'asc' } });
       expect(platformEntries).toHaveLength(0);
+      const transferGroup = `FEE:TRANSFER:${sale.id}`;
 
       const replay = await confirmSalePayment(sale.id, providerReference, idempotencyKey, totalPaidYER);
       expect(replay.status).toBe('ESCROW_HELD');
@@ -67,7 +68,7 @@ describe('Financial integrity', () => {
         expect(response.status).toBe(200);
         expect((await response.json()).status).toBe('ESCROW_HELD');
       }
-      expect(await db.financialLedger.count({ where: { entryGroupId: platformGroup } })).toBe(2);
+      expect(await db.financialLedger.count({ where: { entryGroupId: transferGroup } })).toBe(2);
 
       await expect(confirmSalePayment(sale.id, providerReference, idempotencyKey, 1)).rejects.toThrow('PAYMENT_AMOUNT_MISMATCH');
       await expect(confirmSalePayment(sale.id, `PROVIDER-OTHER-${suffix}`, idempotencyKey, totalPaidYER)).rejects.toThrow('PAYMENT_PROVIDER_REFERENCE_MISMATCH');
